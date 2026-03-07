@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Dinamika Sejarah Indonesia - Aplikasi Pendidikan Sejarah" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <title>Dinamika Sejarah Indonesia</title>
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <!-- Font Turtles dan Poppins -->
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet" />
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css" />
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json" />
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/component/chatbot_icon.png" />
+    <link rel="apple-touch-icon" href="assets/component/chatbot_icon.png" />
+  </head>
+  <body class="bg-dark text-white">
+    <!-- Main Container -->
+    <div class="container-fluid min-vh-100 d-flex flex-column">
+      <!-- Header Section -->
+      <div class="header-section text-center py-5 px-3">
+        <img src="assets/component/logo-dinasty.png" alt="Logo Dinasty" class="logo mb-3" />
+        <h1 class="title-sub mb-4">Yuk Cari Tau!</h1>
+        <div class="header-divider"></div>
+      </div>
+
+      <!-- Menu Cards Section -->
+      <div class="flex-grow-1 d-flex align-items-center justify-content-center px-3 pb-5">
+        <div class="menu-container">
+          <!-- ASK HISTORIA Card -->
+          <div class="menu-card card-historia" data-target="/chatbot" role="button" tabindex="0" aria-label="Buka halaman Ask Historia">
+            <div class="card-image-wrapper">
+              <img src="assets/component/chatbot_menu.png" alt="Ask Historia Background" class="card-bg-image" />
+              <div class="card-overlay-content">
+                <img src="assets/component/chatbot_icon.png" alt="Chatbot Icon" class="card-icon" />
+              </div>
+            </div>
+          </div>
+
+          <!-- SCAN HISTORIA Card -->
+          <div class="menu-card card-scanner" data-target="/scanner" role="button" tabindex="0" aria-label="Buka halaman Scan Historia">
+            <div class="card-image-wrapper">
+              <img src="assets/component/scanner_menu.png" alt="Scan Historia Background" class="card-bg-image" />
+              <div class="card-overlay-content">
+                <img src="assets/component/scaner_icon.png" alt="Scanner Icon" class="card-icon" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Service Worker Registration -->
+    <script src="js/app.js"></script>
+  </body>
+</html>

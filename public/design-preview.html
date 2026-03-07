@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Design Preview - Dinamika Sejarah Indonesia</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Poppins", sans-serif;
+        background: #f5f5f5;
+        padding: 2rem;
+      }
+
+      .preview-container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        text-align: center;
+        margin-bottom: 3rem;
+        color: #333;
+        font-family: "Playfair Display", serif;
+      }
+
+      .preview-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        gap: 2rem;
+        margin-bottom: 3rem;
+      }
+
+      .preview-item {
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+
+      .preview-title {
+        padding: 1.5rem;
+        background: #16213e;
+        color: #ffc107;
+        font-family: "Playfair Display", serif;
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+
+      .preview-content {
+        padding: 2rem;
+      }
+
+      .color-swatch {
+        display: inline-block;
+        width: 100px;
+        height: 100px;
+        border-radius: 8px;
+        margin: 0.5rem;
+        vertical-align: top;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      }
+
+      .color-info {
+        text-align: center;
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+        color: #666;
+      }
+
+      .font-sample {
+        margin: 1rem 0;
+        padding: 1rem;
+        background: #f9f9f9;
+        border-left: 4px solid #ffc107;
+        border-radius: 4px;
+      }
+
+      .font-playfair {
+        font-family: "Playfair Display", serif;
+        font-size: 2rem;
+        font-weight: 700;
+        color: #1a1a2e;
+        margin-bottom: 0.5rem;
+      }
+
+      .font-poppins {
+        font-family: "Poppins", sans-serif;
+        font-size: 1rem;
+        color: #666;
+        line-height: 1.5;
+      }
+
+      .mobile-frame {
+        background: #000;
+        border-radius: 40px;
+        padding: 12px;
+        margin: 1rem auto;
+        max-width: 400px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        aspect-ratio: 9 / 16;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .mobile-notch {
+        background: #000;
+        height: 30px;
+        border-radius: 0 0 30px 30px;
+        margin-bottom: 8px;
+      }
+
+      .mobile-screen {
+        flex: 1;
+        background: #1a1a2e;
+        border-radius: 30px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .mobile-header {
+        background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+        padding: 2rem 1rem;
+        text-align: center;
+        border-bottom: 3px solid #ffc107;
+      }
+
+      .mobile-title {
+        font-family: "Playfair Display", serif;
+        font-size: 2.5rem;
+        font-weight: 900;
+        color: #ffc107;
+        margin-bottom: 0.5rem;
+        letter-spacing: 2px;
+      }
+
+      .mobile-subtitle {
+        font-family: "Poppins", sans-serif;
+        font-size: 0.9rem;
+        color: #e0e0e0;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+
+      .mobile-divider {
+        width: 60px;
+        height: 3px;
+        background: #ffc107;
+        margin: 1rem auto 0;
+        border-radius: 2px;
+      }
+
+      .mobile-content {
+        flex: 1;
+        padding: 1.5rem;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .mobile-card {
+        width: 100%;
+        height: 150px;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.6) 100%);
+        border-radius: 15px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: center;
+        padding: 1.5rem;
+        text-align: center;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        cursor: pointer;
+        transition: transform 0.3s ease;
+      }
+
+      .mobile-card:hover {
+        transform: translateY(-5px);
+      }
+
+      .mobile-icon {
+        width: 50px;
+        height: 50px;
+        background: #ffc107;
+        border-radius: 50%;
+        margin-bottom: 0.8rem;
+      }
+
+      .mobile-card-title {
+        font-family: "Playfair Display", serif;
+        font-size: 1.2rem;
+        color: #ffc107;
+        margin-bottom: 0.3rem;
+        font-weight: 700;
+      }
+
+      .mobile-card-desc {
+        font-family: "Poppins", sans-serif;
+        font-size: 0.75rem;
+        color: #e0e0e0;
+      }
+
+      .feature-list {
+        list-style: none;
+        padding: 0;
+      }
+
+      .feature-list li {
+        padding: 0.8rem;
+        margin: 0.5rem 0;
+        background: #f0f0f0;
+        border-left: 4px solid #ffc107;
+        border-radius: 4px;
+      }
+
+      .feature-list strong {
+        color: #1a1a2e;
+      }
+
+      .code-block {
+        background: #1a1a2e;
+        color: #ffc107;
+        padding: 1rem;
+        border-radius: 8px;
+        overflow-x: auto;
+        font-family: "Courier New", monospace;
+        font-size: 0.85rem;
+        margin: 1rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-container">
+      <h1>🎨 Design Preview - Dinamika Sejarah Indonesia</h1>
+
+      <div class="preview-grid">
+        <!-- Color Palette -->
+        <div class="preview-item">
+          <div class="preview-title">Color Palette</div>
+          <div class="preview-content">
+            <div>
+              <div class="color-swatch" style="background: #1a1a2e"></div>
+              <div class="color-info">Primary<br />#1a1a2e</div>
+            </div>
+            <div>
+              <div class="color-swatch" style="background: #16213e"></div>
+              <div class="color-info">Secondary<br />#16213e</div>
+            </div>
+            <div>
+              <div class="color-swatch" style="background: #ffc107"></div>
+              <div class="color-info">Accent<br />#ffc107</div>
+            </div>
+            <div>
+              <div class="color-swatch" style="background: #e0e0e0"></div>
+              <div class="color-info">Text Light<br />#e0e0e0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Typography -->
+        <div class="preview-item">
+          <div class="preview-title">Typography</div>
+          <div class="preview-content">
+            <div class="font-sample">
+              <div class="font-playfair">Playfair Display</div>
+              <div style="font-size: 0.85rem; color: #999">Untuk heading/title utama</div>
+              <div style="font-size: 0.85rem; color: #999; margin-top: 0.3rem">Weight: 700, 900 | Letter-spacing: 1-3px</div>
+            </div>
+            <div class="font-sample">
+              <div class="font-poppins" style="font-size: 1.1rem; font-weight: 600">Poppins Semi Bold</div>
+              <div style="font-size: 0.85rem; color: #999">Untuk body text dan UI elements</div>
+              <div style="font-size: 0.85rem; color: #999; margin-top: 0.3rem">Weight: 400, 600 | Letter-spacing: normal</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Button Styles -->
+        <div class="preview-item">
+          <div class="preview-title">Button Styles</div>
+          <div class="preview-content">
+            <button
+              style="
+                width: 100%;
+                padding: 0.8rem;
+                margin: 0.5rem 0;
+                background: #ffc107;
+                color: #1a1a2e;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                font-family: &quot;Poppins&quot;, sans-serif;
+                transition: all 0.3s ease;
+              ">
+              Primary Button
+            </button>
+            <button
+              style="
+                width: 100%;
+                padding: 0.8rem;
+                margin: 0.5rem 0;
+                background: transparent;
+                color: #ffc107;
+                border: 2px solid #ffc107;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                font-family: &quot;Poppins&quot;, sans-serif;
+                transition: all 0.3s ease;
+              ">
+              Outline Button
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile Preview -->
+      <div style="text-align: center; margin: 3rem 0">
+        <h2 style="font-family: &quot;Playfair Display&quot;, serif; margin-bottom: 2rem; color: #333">Home Page Mobile Preview</h2>
+        <div class="mobile-frame">
+          <div class="mobile-notch"></div>
+          <div class="mobile-screen">
+            <div class="mobile-header">
+              <div class="mobile-title">DINAMIKA</div>
+              <div class="mobile-subtitle">Sejarah Indonesia</div>
+              <div class="mobile-divider"></div>
+            </div>
+            <div class="mobile-content">
+              <div class="mobile-card">
+                <div class="mobile-icon"></div>
+                <div class="mobile-card-title">ASK HISTORIA</div>
+                <div class="mobile-card-desc">Tanya jawab sejarah</div>
+              </div>
+              <div class="mobile-card">
+                <div class="mobile-icon"></div>
+                <div class="mobile-card-title">SCAN HISTORIA</div>
+                <div class="mobile-card-desc">Scan QR Code sejarah</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Design Features -->
+      <div class="preview-item" style="margin: 3rem 0">
+        <div class="preview-title">✨ Design Features</div>
+        <div class="preview-content">
+          <ul class="feature-list">
+            <li><strong>Font Turtles:</strong> Playfair Display untuk heading dengan letter-spacing 1-3px</li>
+            <li><strong>Responsive Design:</strong> Mobile-first dengan breakpoints di 480px, 768px</li>
+            <li><strong>Card Hover Effect:</strong> Transform translateY(-8px) dengan smooth transition</li>
+            <li><strong>Icon Animation:</strong> Float animation 3s infinite pada card icons</li>
+            <li><strong>Gradient Backgrounds:</strong> Linear gradient untuk header dan overlay</li>
+            <li><strong>Text Shadow:</strong> Multiple text shadows untuk depth dan readability</li>
+            <li><strong>Component Images:</strong> Menggunakan bg_chatbot.png, bg_dinasty.png sebagai backgrounds</li>
+            <li><strong>Mobile Optimization:</strong> Touch-friendly buttons dan responsive font sizes</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Responsive Breakpoints -->
+      <div class="preview-item">
+        <div class="preview-title">📱 Responsive Breakpoints</div>
+        <div class="preview-content">
+          <div class="font-sample">
+            <strong>Desktop (>768px)</strong>
+            <div class="code-block">
+              Title: 4rem<br />
+              Card Height: 280px<br />
+              Card Icon: 70px<br />
+              Border Radius: 20px
+            </div>
+          </div>
+          <div class="font-sample">
+            <strong>Tablet (480px ≤ width ≤ 768px)</strong>
+            <div class="code-block">
+              Title: 2.8rem<br />
+              Card Height: 240px<br />
+              Card Icon: 65px<br />
+              Border Radius: 18px
+            </div>
+          </div>
+          <div class="font-sample">
+            <strong>Mobile (≤480px)</strong>
+            <div class="code-block">
+              Title: 2.2rem<br />
+              Card Height: 220px<br />
+              Card Icon: 60px<br />
+              Border Radius: 16px
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CSS Classes -->
+      <div class="preview-item">
+        <div class="preview-title">🏗️ CSS Classes Reference</div>
+        <div class="preview-content">
+          <div class="font-sample">
+            <strong>Header Classes</strong>
+            <div class="code-block">
+              .header-section<br />
+              .title-main<br />
+              .title-sub<br />
+              .header-divider
+            </div>
+          </div>
+          <div class="font-sample">
+            <strong>Menu Classes</strong>
+            <div class="code-block">
+              .menu-container<br />
+              .menu-card<br />
+              .card-image-wrapper<br />
+              .card-bg-image<br />
+              .card-overlay-content<br />
+              .card-icon<br />
+              .card-title<br />
+              .card-subtitle
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

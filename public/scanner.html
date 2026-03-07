@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="SCAN HISTORIA - Scanner QR Code Sejarah" />
+    <meta name="theme-color" content="#1a1a2e" />
+
+    <title>SCAN HISTORIA - QR Scanner</title>
+
+    <!-- Bootstrap 5 (local/offline) -->
+    <link href="/vendor/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css" />
+    <!-- QR Code Scanner Library (local/offline) -->
+    <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
+    <!-- jsQR Library for file-based QR decoding (local/offline) -->
+    <script src="/vendor/jsqr/dist/jsQR.js"></script>
+  </head>
+  <body class="bg-dark text-white">
+    <div class="container-fluid vh-100 d-flex flex-column px-0">
+      <!-- Header Section -->
+      <div class="header-section text-center py-5 px-3">
+        <img src="assets/component/logo-dinasty.png" alt="Logo Dinasty" class="logo mb-3" />
+        <h1 class="title-sub mb-4">SCAN HISTORIA</h1>
+        <div class="header-divider"></div>
+      </div>
+
+      <!-- Scanner Area -->
+      <div class="flex-grow-1 d-flex flex-column justify-content-center align-items-center p-3 position-relative">
+        <button class="scanner-back-btn" id="backBtn" style="position: absolute; top: 1rem; left: 1rem">
+          <img src="assets/component/back_btn.png" alt="Button Back" />
+        </button>
+        <div id="reader" class="rounded-4 overflow-hidden" style="width: 100%; max-width: 400px; border: 3px solid #ffc107"></div>
+
+        <!-- Upload File Button -->
+        <div class="mt-4">
+          <label for="qrFileInput" class="btn btn-secondary btn-sm rounded-3"> 📁 Upload Gambar QR Code </label>
+          <input type="file" id="qrFileInput" accept="image/*" style="display: none" />
+        </div>
+
+        <!-- Status Messages -->
+        <div id="statusMessage" class="mt-4 text-center"></div>
+
+        <!-- Result Display -->
+        <div id="resultContainer" class="d-none mt-4 w-100 max-width-400">
+          <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <h4 class="alert-heading fw-bold">QR Code Terdeteksi!</h4>
+            <p id="payloadType" class="mb-1 fw-semibold small text-dark"></p>
+            <p id="resultText" class="mb-0"></p>
+            <p id="payloadHint" class="mt-2 mb-0 small text-dark"></p>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+          <div class="d-grid gap-2">
+            <button class="btn btn-primary btn-lg fw-bold rounded-3" id="openLinkBtn"> Buka Link </button>
+            <button class="btn btn-warning fw-bold rounded-3" id="copyPayloadBtn"> Salin Isi QR </button>
+            <button class="btn btn-outline-secondary rounded-3" id="resetScannerBtn"> Scan Lagi </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="p-3 border-top border-secondary text-center">
+        <small class="text-secondary">Arahkan kamera ke QR Code</small>
+      </div>
+    </div>
+
+    <!-- Bootstrap JS (local/offline) -->
+    <script src="/vendor/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Scanner Script -->
+    <script src="js/scanner.js"></script>
+  </body>
+</html>
