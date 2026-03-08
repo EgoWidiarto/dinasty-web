@@ -2,6 +2,34 @@
 let html5QrcodeScanner;
 let scannedResult = null;
 
+function autoSelectBackCameraAndStart(maxRetry = 12) {
+  const readerEl = document.getElementById("reader");
+  if (!readerEl) return;
+
+  const cameraSelect = readerEl.querySelector("select");
+  const startButton = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
+
+  if (!cameraSelect || cameraSelect.options.length === 0) {
+    if (maxRetry > 0) {
+      setTimeout(() => autoSelectBackCameraAndStart(maxRetry - 1), 250);
+    }
+    return;
+  }
+
+  const options = Array.from(cameraSelect.options);
+  const backCameraOption = options.find((opt) => /back|rear|environment|belakang|world/i.test((opt.textContent || "").toLowerCase()));
+  const targetOption = backCameraOption || options[0];
+
+  if (targetOption && cameraSelect.value !== targetOption.value) {
+    cameraSelect.value = targetOption.value;
+    cameraSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  if (startButton && !startButton.disabled) {
+    startButton.click();
+  }
+}
+
 function isValidHttpUrl(value) {
   try {
     const url = new URL(value);
@@ -83,9 +111,12 @@ function initializeScanner() {
       {
         fps: isMobile ? 10 : 15,
         qrbox: isMobile ? { width: 250, height: 250 } : { width: 300, height: 300 },
-        rememberLastUsedCamera: true,
+        rememberLastUsedCamera: false,
         showTorchButtonIfSupported: true,
         aspectRatio: 1.0,
+        videoConstraints: {
+          facingMode: { ideal: "environment" },
+        },
         // Force camera untuk mobile
         formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
       },
@@ -93,6 +124,7 @@ function initializeScanner() {
     );
 
     html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    setTimeout(() => autoSelectBackCameraAndStart(), 300);
     console.log("✅ Scanner initialized successfully");
   } catch (error) {
     console.error("❌ Error initializing scanner:", error);
