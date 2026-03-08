@@ -1,9 +1,10 @@
 // Service Worker
-const CACHE_NAME = "dinamika-v4";
+const CACHE_NAME = "dinamika-v5";
 const urlsToCache = ["/", "/index.html", "/chatbot.html", "/scanner.html", "/css/style.css", "/js/app.js", "/js/chatbot.js", "/js/scanner.js", "/manifest.json"];
 
-// Install event
+// Install event - skip waiting untuk langsung aktif
 self.addEventListener("install", (event) => {
+  self.skipWaiting(); // Aktifkan service worker baru langsung
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log("✅ Cache opened");
@@ -23,7 +24,10 @@ self.addEventListener("activate", (event) => {
             return caches.delete(cacheName);
           }
         }),
-      );
+      ).then(() => {
+        // Claim semua clients agar service worker baru langsung aktif
+        return self.clients.claim();
+      });
     }),
   );
 });

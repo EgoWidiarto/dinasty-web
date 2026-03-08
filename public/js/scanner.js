@@ -70,18 +70,37 @@ function renderPayloadInfo(payload) {
 
 // Initialize QR Code Scanner
 function initializeScanner() {
-  html5QrcodeScanner = new Html5QrcodeScanner(
-    "reader",
-    {
-      fps: 10,
-      qrbox: { width: 300, height: 300 },
-      rememberLastUsedCamera: true,
-      showTorchButtonIfSupported: true,
-    },
-    false,
-  );
+  try {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-  html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    html5QrcodeScanner = new Html5QrcodeScanner(
+      "reader",
+      {
+        fps: isMobile ? 10 : 15,
+        qrbox: isMobile ? { width: 250, height: 250 } : { width: 300, height: 300 },
+        rememberLastUsedCamera: true,
+        showTorchButtonIfSupported: true,
+        aspectRatio: 1.0,
+        // Force camera untuk mobile
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      },
+      false,
+    );
+
+    html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    console.log("✅ Scanner initialized successfully");
+  } catch (error) {
+    console.error("❌ Error initializing scanner:", error);
+    showError("Gagal memulai scanner. Mohon refresh halaman.");
+  }
+}
+
+// Helper function untuk show error
+function showError(message) {
+  const statusMsg = document.getElementById("statusMessage");
+  if (statusMsg) {
+    statusMsg.innerHTML = `<div class="alert alert-danger">${message}</div>`;
+  }
 }
 
 function onScanSuccess(decodedText, decodedResult) {
@@ -286,7 +305,10 @@ window.addEventListener("load", () => {
     });
   }
 
-  initializeScanner();
+  // Tambahkan delay untuk pastikan DOM ready di mobile
+  setTimeout(() => {
+    initializeScanner();
+  }, 100);
 });
 
 // Cleanup on unload
