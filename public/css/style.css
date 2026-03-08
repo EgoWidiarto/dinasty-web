@@ -432,8 +432,15 @@ label {
   }
 
   .card-image-wrapper {
-    line-height: 13rem;
-    height: 13rem;
+    width: min(92vw, 420px);
+    height: auto;
+    line-height: 0;
+  }
+
+  .card-bg-image {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
   }
 
   .card-title {
@@ -478,8 +485,15 @@ label {
   }
 
   .card-image-wrapper {
-    line-height: 9rem;
-    height: 9rem;
+    width: min(92vw, 360px);
+    height: auto;
+    line-height: 0;
+  }
+
+  .card-bg-image {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
   }
 
   .card-icon {
