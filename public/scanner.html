@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="SCAN HISTORIA - Scanner QR Code Sejarah" />
+    <meta name="description" content="SCAN DINASTY - Scanner QR Code" />
     <meta name="theme-color" content="#1a1a2e" />
     <!-- Disable cache untuk scanner page -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
@@ -21,12 +21,12 @@
     <!-- jsQR Library for file-based QR decoding -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   </head>
-  <body class="bg-dark text-white">
+  <body class="bg-dark text-white scanner-page">
     <div class="container-fluid vh-100 d-flex flex-column px-0">
       <!-- Header Section -->
       <div class="header-section text-center py-5 px-3">
         <img src="assets/component/logo-dinasty.png" alt="Logo Dinasty" class="logo mb-3" />
-        <h1 class="title-sub mb-4">SCAN HISTORIA</h1>
+        <h1 class="title-sub mb-4">SCAN DINASTY</h1>
         <div class="header-divider"></div>
       </div>
 
@@ -36,7 +36,7 @@
 
       <!-- Scanner Area -->
       <div class="flex-grow-1 d-flex flex-column justify-content-center align-items-center p-3">
-        <div id="reader" class="rounded-4 overflow-hidden" style="width: 100%; max-width: 400px; border: 3px solid #ffc107"></div>
+        <div id="reader" class="rounded-4 overflow-hidden" style="width: 100%; max-width: 400px; border: 3px solid #d6a732"></div>
 
         <!-- Upload File Button -->
         <div class="mt-4">
