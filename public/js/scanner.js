@@ -71,6 +71,11 @@ function renderPayloadInfo(payload) {
 // Initialize QR Code Scanner
 function initializeScanner() {
   try {
+    if (typeof Html5QrcodeScanner === "undefined" || typeof Html5QrcodeSupportedFormats === "undefined") {
+      showError("Library scanner gagal dimuat. Tutup tab lalu buka lagi.");
+      return;
+    }
+
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
     html5QrcodeScanner = new Html5QrcodeScanner(

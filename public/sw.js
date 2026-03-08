@@ -1,5 +1,5 @@
 // Service Worker
-const CACHE_NAME = "dinamika-v5";
+const CACHE_NAME = "dinamika-v6";
 const urlsToCache = ["/", "/index.html", "/chatbot.html", "/scanner.html", "/css/style.css", "/js/app.js", "/js/chatbot.js", "/js/scanner.js", "/manifest.json"];
 
 // Install event - skip waiting untuk langsung aktif
