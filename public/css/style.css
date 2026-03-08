@@ -362,8 +362,9 @@ label {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  margin-top: -5rem;
+  margin-top: -3rem;
   margin-left: 4rem;
+  margin-bottom: 1rem;
 }
 
 .scanner-back-btn img {
