@@ -1,6 +1,98 @@
 // QR Scanner Script
 let html5QrcodeScanner;
 let scannedResult = null;
+let autoZoomIntervalId = null;
+
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function pickOptimalCameraOption(options, isMobile) {
+  const scored = options.map((opt) => {
+    const label = (opt.textContent || "").toLowerCase();
+    let score = 0;
+
+    // Prioritas utama: kamera belakang / environment
+    if (/back|rear|environment|belakang|world|main camera/.test(label)) score += 120;
+    if (/front|selfie|user|depan/.test(label)) score -= 90;
+
+    // Prioritas kualitas kamera
+    if (/4k|2160|uhd/.test(label)) score += 25;
+    if (/1080|full hd|fhd/.test(label)) score += 20;
+    if (/720|hd/.test(label)) score += 10;
+    if (/wide|ultra wide|tele|macro/.test(label)) score += 8;
+
+    // Hindari virtual camera di desktop
+    if (/virtual|obs|droidcam|epoccam/.test(label)) score -= 80;
+
+    // Mobile: dorong kamera belakang lebih agresif
+    if (isMobile && /back|rear|environment|belakang|world/.test(label)) score += 40;
+
+    return { opt, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.opt || options[0];
+}
+
+function getInnerHtml5QrcodeInstance() {
+  if (!html5QrcodeScanner) return null;
+  return html5QrcodeScanner.html5Qrcode || html5QrcodeScanner.html5Qrcode_ || null;
+}
+
+async function applyZoomLevel(level) {
+  const inner = getInnerHtml5QrcodeInstance();
+  if (!inner || typeof inner.getRunningTrackCapabilities !== "function" || typeof inner.applyVideoConstraints !== "function") {
+    return false;
+  }
+
+  try {
+    const capabilities = inner.getRunningTrackCapabilities();
+    if (!capabilities?.zoom) return false;
+
+    const min = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
+    const max = Number.isFinite(capabilities.zoom.max) ? capabilities.zoom.max : min;
+    if (max <= min) return false;
+
+    const targetZoom = Math.max(min, Math.min(max, min + (max - min) * level));
+    await inner.applyVideoConstraints({ advanced: [{ zoom: targetZoom }] });
+    return true;
+  } catch (err) {
+    console.warn("Zoom constraint tidak didukung kamera/browser:", err);
+    return false;
+  }
+}
+
+function startAdaptiveAutoZoom() {
+  stopAdaptiveAutoZoom();
+
+  const zoomLevels = [0.55, 0.7, 0.82, 0.92];
+  let idx = 0;
+
+  // Coba sekali cepat saat awal scan
+  setTimeout(() => {
+    applyZoomLevel(zoomLevels[0]);
+  }, 500);
+
+  autoZoomIntervalId = setInterval(async () => {
+    if (scannedResult) {
+      stopAdaptiveAutoZoom();
+      return;
+    }
+
+    const applied = await applyZoomLevel(zoomLevels[idx]);
+    if (applied) {
+      idx = (idx + 1) % zoomLevels.length;
+    }
+  }, 1800);
+}
+
+function stopAdaptiveAutoZoom() {
+  if (autoZoomIntervalId) {
+    clearInterval(autoZoomIntervalId);
+    autoZoomIntervalId = null;
+  }
+}
 
 function autoSelectBackCameraAndStart(maxRetry = 12) {
   const readerEl = document.getElementById("reader");
@@ -17,8 +109,7 @@ function autoSelectBackCameraAndStart(maxRetry = 12) {
   }
 
   const options = Array.from(cameraSelect.options);
-  const backCameraOption = options.find((opt) => /back|rear|environment|belakang|world/i.test((opt.textContent || "").toLowerCase()));
-  const targetOption = backCameraOption || options[0];
+  const targetOption = pickOptimalCameraOption(options, isMobileDevice());
 
   if (targetOption && cameraSelect.value !== targetOption.value) {
     cameraSelect.value = targetOption.value;
@@ -27,6 +118,9 @@ function autoSelectBackCameraAndStart(maxRetry = 12) {
 
   if (startButton && !startButton.disabled) {
     startButton.click();
+    setTimeout(() => {
+      startAdaptiveAutoZoom();
+    }, 1200);
   }
 }
 
@@ -104,7 +198,7 @@ function initializeScanner() {
       return;
     }
 
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isMobile = isMobileDevice();
 
     html5QrcodeScanner = new Html5QrcodeScanner(
       "reader",
@@ -142,6 +236,7 @@ function showError(message) {
 
 function onScanSuccess(decodedText, decodedResult) {
   console.log("✅ QR Code terdeteksi:", decodedText);
+  stopAdaptiveAutoZoom();
 
   // Stop scanning only if scanner is running
   if (html5QrcodeScanner) {
@@ -212,6 +307,9 @@ function resetScanner() {
   // Resume scanning
   if (html5QrcodeScanner) {
     html5QrcodeScanner.resume();
+    setTimeout(() => {
+      startAdaptiveAutoZoom();
+    }, 600);
   }
 }
 
@@ -350,6 +448,7 @@ window.addEventListener("load", () => {
 
 // Cleanup on unload
 window.addEventListener("beforeunload", () => {
+  stopAdaptiveAutoZoom();
   if (html5QrcodeScanner) {
     html5QrcodeScanner.clear();
   }
