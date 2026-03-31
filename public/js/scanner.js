@@ -2,13 +2,28 @@
 let html5QrcodeScanner;
 let scannedResult = null;
 let autoZoomIntervalId = null;
+let scannerUiBootstrapTimer = null;
+let scannerUiBootstrapAttempts = 0;
+let hasAutoStartedScanner = false;
 
 function isMobileDevice() {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 function pickOptimalCameraOption(options, isMobile) {
-  const scored = options.map((opt) => {
+  const validOptions = options.filter((opt) => {
+    const value = (opt.value || "").trim();
+    const label = (opt.textContent || "").toLowerCase();
+    if (!value) return false;
+    if (/select|pilih|choose/.test(label)) return false;
+    return true;
+  });
+
+  if (validOptions.length === 0) {
+    return null;
+  }
+
+  const scored = validOptions.map((opt) => {
     const label = (opt.textContent || "").toLowerCase();
     let score = 0;
 
@@ -32,7 +47,7 @@ function pickOptimalCameraOption(options, isMobile) {
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored[0]?.opt || options[0];
+  return scored[0]?.opt || validOptions[0];
 }
 
 function getInnerHtml5QrcodeInstance() {
@@ -94,7 +109,120 @@ function stopAdaptiveAutoZoom() {
   }
 }
 
-function autoSelectBackCameraAndStart(maxRetry = 12) {
+function translateScannerTextToIndonesian(text) {
+  const normalized = (text || "").trim();
+  if (!normalized) return null;
+
+  const translationRules = [
+    [/^start scanning$/i, "Mulai Scan"],
+    [/^stop scanning$/i, "Hentikan Scan"],
+    [/^scan an image file$/i, "Pindai dari File Gambar"],
+    [/^scan using camera directly$/i, "Pindai Langsung dengan Kamera"],
+    [/^camera based scan$/i, "Mode Kamera"],
+    [/^file based scan$/i, "Mode File"],
+    [/^select camera\s*\((\d+)\)$/i, "Pilih Kamera ($1)"],
+    [/^select camera$/i, "Pilih Kamera"],
+    [/^requesting camera permissions$/i, "Meminta izin kamera"],
+    [/^no cameras found$/i, "Kamera tidak ditemukan"],
+    [/^camera permission denied$/i, "Izin kamera ditolak"],
+    [/^camera access is blocked$/i, "Akses kamera diblokir"],
+  ];
+
+  for (const [regex, replacement] of translationRules) {
+    if (regex.test(normalized)) {
+      return normalized.replace(regex, replacement);
+    }
+  }
+
+  return null;
+}
+
+function localizeAndPolishScannerUi() {
+  const readerEl = document.getElementById("reader");
+  if (!readerEl) return;
+
+  const applyUi = () => {
+    const swapLink = readerEl.querySelector("#reader__dashboard_section_swaplink");
+    if (swapLink) {
+      swapLink.style.display = "none";
+    }
+
+    const fileScanSection = readerEl.querySelector("#reader__dashboard_section_fsr");
+    if (fileScanSection) {
+      fileScanSection.style.display = "none";
+    }
+
+    // Hilangkan teks "Select Camera (x)" tanpa menghapus tombol Start
+    const cameraSection = readerEl.querySelector("#reader__dashboard_section_csr");
+    if (cameraSection) {
+      const walker = document.createTreeWalker(cameraSection, NodeFilter.SHOW_TEXT);
+      const textNodes = [];
+      while (walker.nextNode()) {
+        textNodes.push(walker.currentNode);
+      }
+
+      textNodes.forEach((node) => {
+        const txt = (node.nodeValue || "").trim();
+        if (/^select camera\s*\(\d+\)$/i.test(txt) || /^select camera$/i.test(txt) || /^pilih kamera\s*\(\d+\)$/i.test(txt) || /^pilih kamera$/i.test(txt)) {
+          node.nodeValue = "";
+        }
+      });
+
+      const labelCandidates = Array.from(cameraSection.querySelectorAll("label, span, p"));
+      labelCandidates.forEach((el) => {
+        if (el.children.length > 0) return;
+        const txt = (el.textContent || "").trim();
+        if (/^select camera\s*\(\d+\)$/i.test(txt) || /^select camera$/i.test(txt) || /^pilih kamera\s*\(\d+\)$/i.test(txt) || /^pilih kamera$/i.test(txt)) {
+          el.style.display = "none";
+        }
+      });
+    }
+
+    const allButtons = Array.from(readerEl.querySelectorAll("button"));
+    allButtons.forEach((btn) => {
+      const label = (btn.textContent || "").trim().toLowerCase();
+
+      if (/request camera permissions|minta izin kamera|izinkan kamera/.test(label)) {
+        btn.textContent = "Izinkan Kamera";
+        btn.classList.add("scanner-permission-btn");
+      } else if (/stop scanning|hentikan scan|stop/.test(label)) {
+        btn.textContent = "Hentikan Scan";
+        btn.classList.add("scanner-stop-btn");
+      } else if (/start scanning|start|mulai|scan/i.test(label)) {
+        btn.textContent = "Mulai Scan";
+        btn.classList.add("scanner-start-btn");
+      }
+    });
+
+    // Terjemahkan semua teks bawaan html5-qrcode yang masih berbahasa Inggris
+    const translatableElements = Array.from(readerEl.querySelectorAll("button, a, span, p, label"));
+    translatableElements.forEach((el) => {
+      if (el.children.length > 0) return;
+
+      const raw = (el.textContent || "").trim();
+      const translated = translateScannerTextToIndonesian(raw);
+      if (translated && translated !== raw) {
+        el.textContent = translated;
+      }
+    });
+
+    // Sembunyikan teks bawaan "Select Camera (x)" jika masih muncul
+    const maybeCameraLabels = Array.from(readerEl.querySelectorAll("span, p, label"));
+    maybeCameraLabels.forEach((el) => {
+      if (el.children.length > 0) return;
+      const txt = (el.textContent || "").trim();
+      if (/^select camera\s*\(\d+\)$/i.test(txt) || /^select camera$/i.test(txt)) {
+        el.style.display = "none";
+      }
+    });
+  };
+
+  applyUi();
+}
+
+function autoSelectBackCameraAndStart() {
+  if (hasAutoStartedScanner) return;
+
   const readerEl = document.getElementById("reader");
   if (!readerEl) return;
 
@@ -102,9 +230,6 @@ function autoSelectBackCameraAndStart(maxRetry = 12) {
   const startButton = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
 
   if (!cameraSelect || cameraSelect.options.length === 0) {
-    if (maxRetry > 0) {
-      setTimeout(() => autoSelectBackCameraAndStart(maxRetry - 1), 250);
-    }
     return;
   }
 
@@ -116,12 +241,69 @@ function autoSelectBackCameraAndStart(maxRetry = 12) {
     cameraSelect.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  if (startButton && !startButton.disabled) {
-    startButton.click();
-    setTimeout(() => {
-      startAdaptiveAutoZoom();
-    }, 1200);
+  // Jika belum ada kamera valid, tunggu render berikutnya
+  if (!targetOption) {
+    return;
   }
+
+  // Beri jeda kecil agar UI internal selesai memproses event change
+  setTimeout(() => {
+    if (hasAutoStartedScanner) return;
+    const startButtonAfterSelect = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
+    if (startButtonAfterSelect && !startButtonAfterSelect.disabled) {
+      hasAutoStartedScanner = true;
+      startButtonAfterSelect.click();
+      setTimeout(() => {
+        startAdaptiveAutoZoom();
+      }, 1200);
+      stopScannerUiBootstrap();
+    }
+  }, 120);
+}
+
+function stopScannerUiBootstrap() {
+  if (scannerUiBootstrapTimer) {
+    clearInterval(scannerUiBootstrapTimer);
+    scannerUiBootstrapTimer = null;
+  }
+}
+
+function startScannerUiBootstrap() {
+  stopScannerUiBootstrap();
+  scannerUiBootstrapAttempts = 0;
+  hasAutoStartedScanner = false;
+
+  scannerUiBootstrapTimer = setInterval(() => {
+    scannerUiBootstrapAttempts += 1;
+    localizeAndPolishScannerUi();
+    autoSelectBackCameraAndStart();
+
+    // Batasi percobaan agar tidak membebani halaman
+    if (hasAutoStartedScanner || scannerUiBootstrapAttempts >= 30) {
+      stopScannerUiBootstrap();
+    }
+  }, 350);
+}
+
+function observeScannerUiForAutoStart() {
+  const readerEl = document.getElementById("reader");
+  if (!readerEl || typeof MutationObserver === "undefined") return;
+
+  const observer = new MutationObserver(() => {
+    // Coba auto-select berulang tiap ada perubahan UI scanner
+    autoSelectBackCameraAndStart();
+    localizeAndPolishScannerUi();
+  });
+
+  observer.observe(readerEl, {
+    childList: true,
+    subtree: true,
+  });
+
+  // Auto stop observer setelah fase inisialisasi untuk mencegah overhead
+  setTimeout(() => {
+    observer.disconnect();
+  }, 12000);
 }
 
 function isValidHttpUrl(value) {
@@ -200,25 +382,28 @@ function initializeScanner() {
 
     const isMobile = isMobileDevice();
 
-    html5QrcodeScanner = new Html5QrcodeScanner(
-      "reader",
-      {
-        fps: isMobile ? 10 : 15,
-        qrbox: isMobile ? { width: 250, height: 250 } : { width: 300, height: 300 },
-        rememberLastUsedCamera: false,
-        showTorchButtonIfSupported: true,
-        aspectRatio: 1.0,
-        videoConstraints: {
-          facingMode: { ideal: "environment" },
-        },
-        // Force camera untuk mobile
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+    const scannerConfig = {
+      fps: isMobile ? 10 : 15,
+      qrbox: isMobile ? { width: 250, height: 250 } : { width: 300, height: 300 },
+      rememberLastUsedCamera: false,
+      showTorchButtonIfSupported: true,
+      aspectRatio: 1.0,
+      videoConstraints: {
+        facingMode: { ideal: "environment" },
       },
-      false,
-    );
+      // Force camera untuk mobile
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+    };
+
+    // Hanya aktifkan mode kamera (hilangkan tombol "Scan an Image File")
+    if (typeof Html5QrcodeScanType !== "undefined") {
+      scannerConfig.supportedScanTypes = [Html5QrcodeScanType.SCAN_TYPE_CAMERA];
+    }
+
+    html5QrcodeScanner = new Html5QrcodeScanner("reader", scannerConfig, false);
 
     html5QrcodeScanner.render(onScanSuccess, onScanFailure);
-    setTimeout(() => autoSelectBackCameraAndStart(), 300);
+    startScannerUiBootstrap();
     console.log("✅ Scanner initialized successfully");
   } catch (error) {
     console.error("❌ Error initializing scanner:", error);
@@ -448,6 +633,7 @@ window.addEventListener("load", () => {
 
 // Cleanup on unload
 window.addEventListener("beforeunload", () => {
+  stopScannerUiBootstrap();
   stopAdaptiveAutoZoom();
   if (html5QrcodeScanner) {
     html5QrcodeScanner.clear();
