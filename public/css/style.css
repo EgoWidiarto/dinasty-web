@@ -31,6 +31,7 @@
   --text-light: #e0e0e0;
   --danger: #ff6b6b;
   --success: #51cf66;
+  --mobile-max-width: 430px;
 }
 
 html,
@@ -47,6 +48,29 @@ body {
   overflow-x: hidden;
   --font-turtles: "Turtles", "Playfair Display", serif;
   --font-body: "Poppins", sans-serif;
+}
+
+body {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+}
+
+body > .container-fluid {
+  width: 100%;
+  max-width: var(--mobile-max-width);
+  min-height: 100dvh;
+  margin: 0 auto;
+  position: relative;
+}
+
+@media (min-width: 431px) {
+  body > .container-fluid {
+    box-shadow:
+      0 0 0 1px rgba(214, 167, 50, 0.25),
+      0 12px 40px rgba(0, 0, 0, 0.55);
+  }
 }
 
 /* Typography */
@@ -759,6 +783,90 @@ body.scanner-page::before {
 #reader {
   border-color: var(--gold-color) !important;
   box-shadow: 0 0 20px rgba(214, 167, 50, 0.4);
+}
+
+/* Sembunyikan dropdown pemilihan kamera di UI scanner */
+body.scanner-page #reader select,
+body.scanner-page #reader__camera_selection,
+body.scanner-page #reader__dashboard_section_csr select {
+  display: none !important;
+}
+
+/* Sembunyikan opsi file-scan bawaan html5-qrcode (kita pakai tombol upload sendiri) */
+body.scanner-page #reader__dashboard_section_swaplink,
+body.scanner-page #reader__dashboard_section_fsr,
+body.scanner-page #reader a[href="#scan-file"],
+body.scanner-page #reader a[href="#scan-using-file"] {
+  display: none !important;
+}
+
+/* Tombol start scanner versi lokal (lebih rapi) */
+body.scanner-page #reader .scanner-start-btn {
+  background: linear-gradient(135deg, #d6a732 0%, #f1c85d 100%) !important;
+  border: none !important;
+  color: #1a1a2e !important;
+  font-weight: 800 !important;
+  font-size: 0.92rem !important;
+  border-radius: 0.75rem !important;
+  padding: 0.48rem 0.95rem !important;
+  box-shadow: 0 8px 18px rgba(214, 167, 50, 0.35) !important;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+body.scanner-page #reader .scanner-start-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow: 0 10px 22px rgba(214, 167, 50, 0.42) !important;
+}
+
+body.scanner-page #reader .scanner-start-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 5px 14px rgba(214, 167, 50, 0.28) !important;
+}
+
+body.scanner-page #reader .scanner-permission-btn {
+  background: linear-gradient(135deg, #2b7fff 0%, #64a8ff 100%) !important;
+  border: none !important;
+  color: #f8fbff !important;
+  font-weight: 800 !important;
+  font-size: 0.9rem !important;
+  border-radius: 0.75rem !important;
+  padding: 0.48rem 0.95rem !important;
+  box-shadow: 0 8px 18px rgba(43, 127, 255, 0.35) !important;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+body.scanner-page #reader .scanner-permission-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow: 0 10px 22px rgba(43, 127, 255, 0.42) !important;
+}
+
+body.scanner-page #reader .scanner-stop-btn {
+  background: linear-gradient(135deg, #ff5d5d 0%, #ff8b8b 100%) !important;
+  border: none !important;
+  color: #fff7f7 !important;
+  font-weight: 800 !important;
+  font-size: 0.9rem !important;
+  border-radius: 0.75rem !important;
+  padding: 0.48rem 0.95rem !important;
+  box-shadow: 0 8px 18px rgba(255, 93, 93, 0.34) !important;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+body.scanner-page #reader .scanner-stop-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow: 0 10px 22px rgba(255, 93, 93, 0.4) !important;
 }
 
 /* Status message dengan font emas */

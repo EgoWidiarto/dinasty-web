@@ -39,6 +39,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Abaikan skema non-http(s), contoh: chrome-extension://
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.protocol !== "http:" && requestUrl.protocol !== "https:") {
+    return;
+  }
+
   // Skip API calls - let them go through network
   if (event.request.url.includes("/api/")) {
     event.respondWith(
@@ -64,7 +70,9 @@ self.addEventListener("fetch", (event) => {
 
         const responseClone = response.clone();
         caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
+          cache.put(event.request, responseClone).catch((err) => {
+            console.warn("Lewati cache untuk request ini:", event.request.url, err);
+          });
         });
 
         return response;
