@@ -6,10 +6,10 @@ const router = express.Router();
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 // Instruksi sistem untuk chatbot
-const SYSTEM_PROMPT = `Anda adalah ASK HISTORIA, sebuah chatbot ahli yang membantu menjawab pertanyaan tentang sejarah Indonesia dengan BAHASA YANG MUDAH DIPAHAMI ANAK SD-SMP.
+const SYSTEM_PROMPT = `Anda adalah ASK HISTORIA, sebuah chatbot ahli yang hanya membantu menjawab pertanyaan tentang sejarah kerajaan-kerajaan di Indonesia dengan BAHASA YANG MUDAH DIPAHAMI ANAK SD-SMP.
 
 Peran Anda:
-- Menjawab pertanyaan sejarah Indonesia dengan BAHASA SEDERHANA dan MUDAH DIPAHAMI
+- Menjawab pertanyaan tentang sejarah kerajaan-kerajaan di Indonesia dengan BAHASA SEDERHANA dan MUDAH DIPAHAMI
 - Menggunakan kalimat pendek dan tidak berbelit-belit
 - Menjelaskan dengan ANALOGI atau CONTOH NYATA yang relatable untuk anak-anak
 - HINDARI jargon/istilah rumit, jika perlu jelaskan dengan bahasa yang lebih simple
@@ -23,17 +23,59 @@ Panduan Jawaban:
 - INTERAKTIF: Tanyakan balik jika perlu atau ajak untuk lebih penasaran
 
 Batasan:
-- Hanya jawab pertanyaan yang berhubungan dengan sejarah Indonesia
-- Jika ada pertanyaan di luar topik SEJARAH INDONESIA:
+- Hanya jawab pertanyaan yang berhubungan dengan sejarah kerajaan-kerajaan di Indonesia
+- Jika ada pertanyaan di luar topik SEJARAH KERAJAAN INDONESIA:
   * Jawab SANGAT SINGKAT (1-2 kalimat saja, jangan panjang)
   * Jangan jelaskan detail
-  * LANGSUNG arahkan user ke sejarah Indonesia
-  * Contoh: "Maaf, aku ahli sejarah Indonesia aja. Yuk tanya tentang tokoh atau peristiwa sejarah Indonesia? 😊"
+  * LANGSUNG arahkan user ke sejarah kerajaan Indonesia
+  * Contoh: "Maaf, aku cuma ahli sejarah kerajaan Indonesia. Yuk tanya tentang Sriwijaya, Majapahit, Demak, atau kerajaan lain ya 😊"
 - Jangan berikan informasi yang tidak akurat
 
 Contoh Gaya Jawaban:
 ❌ HINDARI: "Rajendra Chola melakukan ekspansi hegemoni ke wilayah Sriwijaya pada abad ke-11..."
-✅ GUNAKAN: "Hayam Wuruk adalah seorang raja di Jawa pada zaman dulu. Dia terkenal karena membuat kerajaannya menjadi kuat dan luas. Seperti pemimpin yang pintar mengatur timnya, Hayam Wuruk pandai memimpin rakyatnya!"`;
+✅ GUNAKAN: "Hayam Wuruk adalah raja Majapahit yang terkenal. Di masanya, Majapahit menjadi sangat besar dan kuat. Seperti kapten tim yang pintar, dia bisa memimpin banyak orang dengan baik!"`;
+
+const KINGDOM_HISTORY_KEYWORDS = [
+  "kerajaan",
+  "kerajaan indonesia",
+  "sejarah kerajaan",
+  "raja",
+  "ratu",
+  "sultan",
+  "sriwijaya",
+  "majapahit",
+  "singhasari",
+  "mataram",
+  "mataram islam",
+  "demak",
+  "aceh",
+  "banten",
+  "pajajaran",
+  "kediri",
+  "kahuripan",
+  "tarumanegara",
+  "kalingga",
+  "kutai",
+  "gowa",
+  "tallo",
+  "ternate",
+  "tidore",
+  "cirebon",
+  "bali",
+  "hindu-buddha",
+  "islam di jawa",
+  "prasasti",
+  "candi",
+];
+
+function isKingdomHistoryQuestion(message) {
+  const normalizedMessage = message.toLowerCase();
+  return KINGDOM_HISTORY_KEYWORDS.some((keyword) => normalizedMessage.includes(keyword));
+}
+
+function getRefusalMessage() {
+  return "Maaf, aku cuma bisa menjawab pertanyaan tentang sejarah kerajaan Indonesia. Yuk tanya tentang Sriwijaya, Majapahit, Demak, Mataram, atau kerajaan lain ya 😊";
+}
 
 // Instruksi sistem untuk chatbot
 
@@ -51,6 +93,14 @@ router.post("/ask", async (req, res) => {
 
     const apiKey = process.env.GROQ_API_KEY;
 
+    if (!isKingdomHistoryQuestion(message)) {
+      return res.json({
+        success: true,
+        response: getRefusalMessage(),
+        message,
+      });
+    }
+
     if (!apiKey) {
       console.error("❌ GROQ_API_KEY tidak ditemukan");
       return res.status(500).json({
@@ -60,7 +110,7 @@ router.post("/ask", async (req, res) => {
     }
 
     // Buat prompt dengan instruksi tambahan
-    const systemMessage = `${SYSTEM_PROMPT}${onlyHistory ? "\n\n[HANYA JAWAB TENTANG SEJARAH INDONESIA]" : ""}`;
+    const systemMessage = `${SYSTEM_PROMPT}\n\n[HANYA JAWAB TENTANG SEJARAH KERAJAAN INDONESIA]\n[TOLAK PERTANYAAN DI LUAR TOPIK DENGAN JAWABAN SINGKAT]`;
 
     // Call Groq API (OpenAI-compatible)
     const groqResponse = await axios.post(

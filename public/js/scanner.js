@@ -5,6 +5,8 @@ let autoZoomIntervalId = null;
 let scannerUiBootstrapTimer = null;
 let scannerUiBootstrapAttempts = 0;
 let hasAutoStartedScanner = false;
+let currentZoomLevel = 1;
+let lastTouchDistance = 0;
 
 function isMobileDevice() {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -70,7 +72,9 @@ async function applyZoomLevel(level) {
     if (max <= min) return false;
 
     const targetZoom = Math.max(min, Math.min(max, min + (max - min) * level));
+    currentZoomLevel = targetZoom;
     await inner.applyVideoConstraints({ advanced: [{ zoom: targetZoom }] });
+    updateZoomDisplay();
     return true;
   } catch (err) {
     console.warn("Zoom constraint tidak didukung kamera/browser:", err);
@@ -78,10 +82,96 @@ async function applyZoomLevel(level) {
   }
 }
 
+async function increaseZoom() {
+  const inner = getInnerHtml5QrcodeInstance();
+  if (!inner || typeof inner.getRunningTrackCapabilities !== "function") return;
+
+  try {
+    const capabilities = inner.getRunningTrackCapabilities();
+    if (!capabilities?.zoom) return;
+
+    const min = capabilities.zoom.min || 1;
+    const max = capabilities.zoom.max || min;
+    const step = (max - min) * 0.1; // 10% increment
+
+    const newZoom = Math.min(max, currentZoomLevel + step);
+    await inner.applyVideoConstraints({ advanced: [{ zoom: newZoom }] });
+    currentZoomLevel = newZoom;
+    updateZoomDisplay();
+  } catch (err) {
+    console.warn("Zoom increase failed:", err);
+  }
+}
+
+async function decreaseZoom() {
+  const inner = getInnerHtml5QrcodeInstance();
+  if (!inner || typeof inner.getRunningTrackCapabilities !== "function") return;
+
+  try {
+    const capabilities = inner.getRunningTrackCapabilities();
+    if (!capabilities?.zoom) return;
+
+    const min = capabilities.zoom.min || 1;
+    const max = capabilities.zoom.max || min;
+    const step = (max - min) * 0.1; // 10% decrement
+
+    const newZoom = Math.max(min, currentZoomLevel - step);
+    await inner.applyVideoConstraints({ advanced: [{ zoom: newZoom }] });
+    currentZoomLevel = newZoom;
+    updateZoomDisplay();
+  } catch (err) {
+    console.warn("Zoom decrease failed:", err);
+  }
+}
+
+function updateZoomDisplay() {
+  const zoomDisplay = document.getElementById("zoomLevelDisplay");
+  if (zoomDisplay) {
+    zoomDisplay.textContent = `${Math.round(currentZoomLevel * 100)}%`;
+  }
+}
+
+function setupPinchToZoom() {
+  const readerEl = document.getElementById("reader");
+  if (!readerEl) return;
+
+  let lastTouchDistance = 0;
+
+  readerEl.addEventListener(
+    "touchmove",
+    (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault(); // Prevent default pinch behavior
+
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        const distance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+
+        if (lastTouchDistance > 0) {
+          const delta = distance - lastTouchDistance;
+          if (delta > 5) {
+            increaseZoom(); // Pinch out = zoom in
+          } else if (delta < -5) {
+            decreaseZoom(); // Pinch in = zoom out
+          }
+        }
+
+        lastTouchDistance = distance;
+      }
+    },
+    { passive: false },
+  );
+
+  readerEl.addEventListener("touchend", () => {
+    lastTouchDistance = 0;
+  });
+}
+
 function startAdaptiveAutoZoom() {
   stopAdaptiveAutoZoom();
 
-  const zoomLevels = [0.55, 0.7, 0.82, 0.92];
+  // Zoom levels lebih agresif untuk scan QR kecil
+  const zoomLevels = [0.4, 0.55, 0.7, 0.82, 0.92];
   let idx = 0;
 
   // Coba sekali cepat saat awal scan
@@ -99,7 +189,7 @@ function startAdaptiveAutoZoom() {
     if (applied) {
       idx = (idx + 1) % zoomLevels.length;
     }
-  }, 1800);
+  }, 1500); // Lebih sering cek (dari 1800ms jadi 1500ms)
 }
 
 function stopAdaptiveAutoZoom() {
@@ -114,18 +204,22 @@ function translateScannerTextToIndonesian(text) {
   if (!normalized) return null;
 
   const translationRules = [
-    [/^start scanning$/i, "Mulai Scan"],
-    [/^stop scanning$/i, "Hentikan Scan"],
-    [/^scan an image file$/i, "Pindai dari File Gambar"],
+    [/^start scanning$/i, "Mulai Memindai"],
+    [/^stop scanning$/i, "Hentikan Pemindaian"],
+    [/^scan an image file$/i, "Unggah Gambar QR"],
     [/^scan using camera directly$/i, "Pindai Langsung dengan Kamera"],
     [/^camera based scan$/i, "Mode Kamera"],
     [/^file based scan$/i, "Mode File"],
     [/^select camera\s*\((\d+)\)$/i, "Pilih Kamera ($1)"],
     [/^select camera$/i, "Pilih Kamera"],
-    [/^requesting camera permissions$/i, "Meminta izin kamera"],
-    [/^no cameras found$/i, "Kamera tidak ditemukan"],
-    [/^camera permission denied$/i, "Izin kamera ditolak"],
-    [/^camera access is blocked$/i, "Akses kamera diblokir"],
+    [/^requesting camera permissions$/i, "Meminta Izin Kamera"],
+    [/^no cameras found$/i, "Kamera Tidak Ditemukan"],
+    [/^camera permission denied$/i, "Izin Kamera Ditolak"],
+    [/^camera access is blocked$/i, "Akses Kamera Diblokir"],
+    [/^launch camera$/i, "Meluncurkan Kamera"],
+    [/^torch on$/i, "Nyalakan Senter"],
+    [/^torch off$/i, "Matikan Senter"],
+    [/^torch$/i, "Senter"],
   ];
 
   for (const [regex, replacement] of translationRules) {
@@ -185,12 +279,20 @@ function localizeAndPolishScannerUi() {
       if (/request camera permissions|minta izin kamera|izinkan kamera/.test(label)) {
         btn.textContent = "Izinkan Kamera";
         btn.classList.add("scanner-permission-btn");
-      } else if (/stop scanning|hentikan scan|stop/.test(label)) {
-        btn.textContent = "Hentikan Scan";
+      } else if (/stop scanning|hentikan scan|hentikan pemindaian/.test(label)) {
+        btn.textContent = "Hentikan Pemindaian";
         btn.classList.add("scanner-stop-btn");
-      } else if (/start scanning|start|mulai|scan/i.test(label)) {
-        btn.textContent = "Mulai Scan";
+      } else if (/start scanning|start|mulai|scan|memindai/.test(label)) {
+        btn.textContent = "Mulai Memindai";
         btn.classList.add("scanner-start-btn");
+      } else if (/torch|senter/.test(label)) {
+        // Update torch button text
+        if (/off|matikan/i.test(label)) {
+          btn.textContent = "Matikan Senter";
+        } else {
+          btn.textContent = "Nyalakan Senter";
+        }
+        btn.classList.add("scanner-torch-btn");
       }
     });
 
@@ -383,13 +485,15 @@ function initializeScanner() {
     const isMobile = isMobileDevice();
 
     const scannerConfig = {
-      fps: isMobile ? 10 : 15,
-      qrbox: isMobile ? { width: 250, height: 250 } : { width: 300, height: 300 },
+      fps: isMobile ? 15 : 20, // Lebih tinggi untuk deteksi lebih cepat
+      qrbox: isMobile ? { width: 280, height: 280 } : { width: 350, height: 350 }, // Qr box lebih besar
       rememberLastUsedCamera: false,
       showTorchButtonIfSupported: true,
       aspectRatio: 1.0,
       videoConstraints: {
         facingMode: { ideal: "environment" },
+        width: { ideal: 1280 }, // Resolusi lebih tinggi
+        height: { ideal: 1280 },
       },
       // Force camera untuk mobile
       formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
@@ -404,6 +508,7 @@ function initializeScanner() {
 
     html5QrcodeScanner.render(onScanSuccess, onScanFailure);
     startScannerUiBootstrap();
+    setupPinchToZoom();
     console.log("✅ Scanner initialized successfully");
   } catch (error) {
     console.error("❌ Error initializing scanner:", error);
@@ -505,6 +610,9 @@ window.addEventListener("load", () => {
   const copyPayloadBtn = document.getElementById("copyPayloadBtn");
   const resetScannerBtn = document.getElementById("resetScannerBtn");
   const qrFileInput = document.getElementById("qrFileInput");
+  const zoomInBtn = document.getElementById("zoomInBtn");
+  const zoomOutBtn = document.getElementById("zoomOutBtn");
+  const zoomSlider = document.getElementById("zoomSlider");
 
   if (backBtn) {
     backBtn.addEventListener("click", () => {
@@ -522,6 +630,22 @@ window.addEventListener("load", () => {
 
   if (resetScannerBtn) {
     resetScannerBtn.addEventListener("click", resetScanner);
+  }
+
+  // Zoom controls
+  if (zoomInBtn) {
+    zoomInBtn.addEventListener("click", increaseZoom);
+  }
+
+  if (zoomOutBtn) {
+    zoomOutBtn.addEventListener("click", decreaseZoom);
+  }
+
+  if (zoomSlider) {
+    zoomSlider.addEventListener("input", async (e) => {
+      const value = parseFloat(e.target.value);
+      await applyZoomLevel(value);
+    });
   }
 
   // Handle file upload for QR code

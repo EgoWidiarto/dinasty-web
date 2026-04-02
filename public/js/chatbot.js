@@ -291,7 +291,7 @@ window.addEventListener("load", () => {
   if (chatContainer) {
     const welcomeDiv = document.createElement("div");
     welcomeDiv.className = "message bot chatbot-greeting-message";
-    welcomeDiv.textContent = "Halo! AKU DINASTI-AI. Tanyakan tentang sejarah Indonesia!";
+    welcomeDiv.textContent = "Halo! AKU DINASTI-AI. Tanyakan tentang sejarah kerajaan Indonesia!";
     chatContainer.appendChild(welcomeDiv);
   }
 
