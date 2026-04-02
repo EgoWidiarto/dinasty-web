@@ -117,8 +117,8 @@ label {
 /* ===== HEADER SECTION ===== */
 .header-section {
   background: transparent;
-  border-bottom: 3px solid var(--gold-color);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  border-bottom: none;
+  box-shadow: none;
   backdrop-filter: none;
 }
 
@@ -154,14 +154,7 @@ h1.title-sub {
 }
 
 .header-divider {
-  width: 100px;
-  height: 4px;
-  background: var(--gold-color);
-  margin: 1.5rem auto 0;
-  border-radius: 2px;
-  box-shadow:
-    0 2px 8px rgba(214, 167, 50, 0.5),
-    0 0 15px rgba(214, 167, 50, 0.3);
+  display: none;
 }
 
 /* ===== MENU CONTAINER ===== */
@@ -641,7 +634,7 @@ h1.title-sub {
   }
 
   .header-divider {
-    width: 80px;
+    display: none;
   }
 
   .card-image-wrapper {
@@ -802,71 +795,118 @@ body.scanner-page #reader a[href="#scan-using-file"] {
 
 /* Tombol start scanner versi lokal (lebih rapi) */
 body.scanner-page #reader .scanner-start-btn {
-  background: linear-gradient(135deg, #d6a732 0%, #f1c85d 100%) !important;
-  border: none !important;
-  color: #1a1a2e !important;
+  background: linear-gradient(135deg, #51cf66 0%, #40c057 100%) !important;
+  border: 2px solid #2f9e44 !important;
+  color: #fff !important;
   font-weight: 800 !important;
-  font-size: 0.92rem !important;
+  font-size: 1rem !important;
   border-radius: 0.75rem !important;
-  padding: 0.48rem 0.95rem !important;
-  box-shadow: 0 8px 18px rgba(214, 167, 50, 0.35) !important;
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.2s ease,
-    filter 0.2s ease;
+  padding: 0.6rem 1.2rem !important;
+  box-shadow: 0 8px 20px rgba(81, 207, 102, 0.35) !important;
+  transition: all 0.2s ease !important;
+  position: relative !important;
+  overflow: hidden !important;
+  cursor: pointer !important;
+}
+
+body.scanner-page #reader .scanner-start-btn::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.2);
+  transition: left 0.4s ease;
+  z-index: 1;
 }
 
 body.scanner-page #reader .scanner-start-btn:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.03);
-  box-shadow: 0 10px 22px rgba(214, 167, 50, 0.42) !important;
+  transform: translateY(-3px) scale(1.02);
+  filter: brightness(1.12);
+  box-shadow: 0 12px 28px rgba(81, 207, 102, 0.55) !important;
+}
+
+body.scanner-page #reader .scanner-start-btn:hover::before {
+  left: 100%;
 }
 
 body.scanner-page #reader .scanner-start-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 5px 14px rgba(214, 167, 50, 0.28) !important;
+  transform: translateY(-1px) scale(0.98);
+  box-shadow: 0 6px 12px rgba(81, 207, 102, 0.3) !important;
 }
 
 body.scanner-page #reader .scanner-permission-btn {
-  background: linear-gradient(135deg, #2b7fff 0%, #64a8ff 100%) !important;
-  border: none !important;
-  color: #f8fbff !important;
+  background: linear-gradient(135deg, #4dabf7 0%, #339af0 100%) !important;
+  border: 2px solid #1971c2 !important;
+  color: #fff !important;
   font-weight: 800 !important;
-  font-size: 0.9rem !important;
+  font-size: 0.95rem !important;
   border-radius: 0.75rem !important;
-  padding: 0.48rem 0.95rem !important;
-  box-shadow: 0 8px 18px rgba(43, 127, 255, 0.35) !important;
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.2s ease,
-    filter 0.2s ease;
+  padding: 0.55rem 1.1rem !important;
+  box-shadow: 0 8px 18px rgba(74, 144, 226, 0.35) !important;
+  transition: all 0.2s ease !important;
+  position: relative !important;
+  cursor: pointer !important;
 }
 
 body.scanner-page #reader .scanner-permission-btn:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-  box-shadow: 0 10px 22px rgba(43, 127, 255, 0.42) !important;
+  transform: translateY(-3px) scale(1.02);
+  filter: brightness(1.1);
+  box-shadow: 0 12px 24px rgba(74, 144, 226, 0.5) !important;
+}
+
+body.scanner-page #reader .scanner-permission-btn:active {
+  transform: translateY(-1px) scale(0.98);
 }
 
 body.scanner-page #reader .scanner-stop-btn {
   background: linear-gradient(135deg, #ff5d5d 0%, #ff8b8b 100%) !important;
-  border: none !important;
-  color: #fff7f7 !important;
+  border: 2px solid #d32f2f !important;
+  color: #fff !important;
   font-weight: 800 !important;
   font-size: 0.9rem !important;
   border-radius: 0.75rem !important;
-  padding: 0.48rem 0.95rem !important;
-  box-shadow: 0 8px 18px rgba(255, 93, 93, 0.34) !important;
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.2s ease,
-    filter 0.2s ease;
+  padding: 0.5rem 1rem !important;
+  box-shadow: 0 8px 18px rgba(255, 93, 93, 0.35) !important;
+  transition: all 0.2s ease !important;
+  position: relative !important;
+  cursor: pointer !important;
 }
 
 body.scanner-page #reader .scanner-stop-btn:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-  box-shadow: 0 10px 22px rgba(255, 93, 93, 0.4) !important;
+  transform: translateY(-3px) scale(1.02);
+  filter: brightness(1.08);
+  box-shadow: 0 12px 24px rgba(255, 93, 93, 0.45) !important;
+}
+
+body.scanner-page #reader .scanner-stop-btn:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+/* Tombol torch (senter) */
+body.scanner-page #reader .scanner-torch-btn {
+  background: linear-gradient(135deg, #ffd43b 0%, #ffb700 100%) !important;
+  border: 2px solid #f59f00 !important;
+  color: #1a1a2e !important;
+  font-weight: 700 !important;
+  font-size: 0.9rem !important;
+  border-radius: 0.75rem !important;
+  padding: 0.5rem 1rem !important;
+  box-shadow: 0 6px 16px rgba(255, 179, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
+  position: relative !important;
+  cursor: pointer !important;
+}
+
+body.scanner-page #reader .scanner-torch-btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  filter: brightness(1.1);
+  box-shadow: 0 8px 20px rgba(255, 179, 0, 0.5) !important;
+}
+
+body.scanner-page #reader .scanner-torch-btn:active {
+  transform: translateY(-1px) scale(0.98);
 }
 
 /* Status message dengan font emas */
@@ -904,4 +944,81 @@ body.scanner-page #reader .scanner-stop-btn:hover {
   background: rgba(0, 0, 0, 0.4);
   z-index: -1;
   pointer-events: none;
+}
+/* Zoom Controls Styling */
+#zoomInBtn,
+#zoomOutBtn {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: bold;
+  transition: all 0.2s ease;
+}
+
+#zoomInBtn:hover,
+#zoomOutBtn:hover {
+  background-color: var(--gold-color) !important;
+  color: var(--primary-color) !important;
+  transform: scale(1.1);
+}
+
+#zoomSlider {
+  accent-color: var(--gold-color);
+  cursor: pointer;
+  -webkit-appearance: slider-horizontal;
+}
+
+#zoomSlider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--gold-color);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+#zoomSlider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 4px 10px rgba(214, 167, 50, 0.5);
+}
+
+#zoomSlider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--gold-color);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+#zoomSlider::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 4px 10px rgba(214, 167, 50, 0.5);
+}
+
+#zoomSlider::-webkit-slider-runnable-track {
+  background: rgba(214, 167, 50, 0.3);
+  height: 6px;
+  border-radius: 3px;
+}
+
+#zoomSlider::-moz-range-track {
+  background: rgba(214, 167, 50, 0.3);
+  height: 6px;
+  border-radius: 3px;
+  border: none;
+}
+
+#zoomLevelDisplay {
+  font-weight: 600;
+  font-size: 0.9rem;
 }
