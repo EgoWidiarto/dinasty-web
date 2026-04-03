@@ -168,28 +168,8 @@ function setupPinchToZoom() {
 }
 
 function startAdaptiveAutoZoom() {
+  // Auto zoom dinonaktifkan sesuai permintaan.
   stopAdaptiveAutoZoom();
-
-  // Zoom levels lebih agresif untuk scan QR kecil
-  const zoomLevels = [0.4, 0.55, 0.7, 0.82, 0.92];
-  let idx = 0;
-
-  // Coba sekali cepat saat awal scan
-  setTimeout(() => {
-    applyZoomLevel(zoomLevels[0]);
-  }, 500);
-
-  autoZoomIntervalId = setInterval(async () => {
-    if (scannedResult) {
-      stopAdaptiveAutoZoom();
-      return;
-    }
-
-    const applied = await applyZoomLevel(zoomLevels[idx]);
-    if (applied) {
-      idx = (idx + 1) % zoomLevels.length;
-    }
-  }, 1500); // Lebih sering cek (dari 1800ms jadi 1500ms)
 }
 
 function stopAdaptiveAutoZoom() {
@@ -204,7 +184,7 @@ function translateScannerTextToIndonesian(text) {
   if (!normalized) return null;
 
   const translationRules = [
-    [/^start scanning$/i, "Mulai Memindai"],
+    [/^start scanning$/i, "Mulai Scan"],
     [/^stop scanning$/i, "Hentikan Pemindaian"],
     [/^scan an image file$/i, "Unggah Gambar QR"],
     [/^scan using camera directly$/i, "Pindai Langsung dengan Kamera"],
@@ -283,7 +263,7 @@ function localizeAndPolishScannerUi() {
         btn.textContent = "Hentikan Pemindaian";
         btn.classList.add("scanner-stop-btn");
       } else if (/start scanning|start|mulai|scan|memindai/.test(label)) {
-        btn.textContent = "Mulai Memindai";
+        btn.textContent = "Mulai Scan";
         btn.classList.add("scanner-start-btn");
       } else if (/torch|senter/.test(label)) {
         // Update torch button text
@@ -355,9 +335,6 @@ function autoSelectBackCameraAndStart() {
     if (startButtonAfterSelect && !startButtonAfterSelect.disabled) {
       hasAutoStartedScanner = true;
       startButtonAfterSelect.click();
-      setTimeout(() => {
-        startAdaptiveAutoZoom();
-      }, 1200);
       stopScannerUiBootstrap();
     }
   }, 120);
@@ -526,7 +503,6 @@ function showError(message) {
 
 function onScanSuccess(decodedText, decodedResult) {
   console.log("✅ QR Code terdeteksi:", decodedText);
-  stopAdaptiveAutoZoom();
 
   // Stop scanning only if scanner is running
   if (html5QrcodeScanner) {
@@ -597,9 +573,6 @@ function resetScanner() {
   // Resume scanning
   if (html5QrcodeScanner) {
     html5QrcodeScanner.resume();
-    setTimeout(() => {
-      startAdaptiveAutoZoom();
-    }, 600);
   }
 }
 
