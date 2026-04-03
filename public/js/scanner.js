@@ -10,6 +10,7 @@ let lastTouchDistance = 0;
 let realtimeFallbackIntervalId = null;
 let fallbackFrameBusy = false;
 let autoCameraCycleIntervalId = null;
+let autoCameraCycleStartTimeoutId = null;
 let autoCameraSwitchInProgress = false;
 const MAX_SAFE_ZOOM_FRACTION = 0.35;
 const CARD_SCAN_QRBLOCK_MOBILE = { width: 170, height: 170 };
@@ -311,13 +312,65 @@ function stabilizeScannerForCard() {
   });
 }
 
+function toGrayscaleImageData(imageData, contrast = 1.0) {
+  const out = new ImageData(imageData.width, imageData.height);
+  const src = imageData.data;
+  const dst = out.data;
+
+  for (let i = 0; i < src.length; i += 4) {
+    const gray = 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
+    const adjusted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
+    dst[i] = adjusted;
+    dst[i + 1] = adjusted;
+    dst[i + 2] = adjusted;
+    dst[i + 3] = 255;
+  }
+
+  return out;
+}
+
+function toBinaryImageData(imageData, threshold) {
+  const out = new ImageData(imageData.width, imageData.height);
+  const src = imageData.data;
+  const dst = out.data;
+
+  for (let i = 0; i < src.length; i += 4) {
+    const gray = src[i];
+    const bin = gray > threshold ? 255 : 0;
+    dst[i] = bin;
+    dst[i + 1] = bin;
+    dst[i + 2] = bin;
+    dst[i + 3] = 255;
+  }
+
+  return out;
+}
+
 function decodeQrFromImageData(imageData) {
   if (typeof jsQR === "undefined" || !imageData) return null;
 
   try {
-    return jsQR(imageData.data, imageData.width, imageData.height, {
+    const raw = jsQR(imageData.data, imageData.width, imageData.height, {
       inversionAttempts: "attemptBoth",
     });
+    if (raw) return raw;
+
+    const gray = toGrayscaleImageData(imageData, 1.35);
+    const grayDecoded = jsQR(gray.data, gray.width, gray.height, {
+      inversionAttempts: "attemptBoth",
+    });
+    if (grayDecoded) return grayDecoded;
+
+    const thresholds = [90, 110, 130, 150, 170];
+    for (const t of thresholds) {
+      const bw = toBinaryImageData(gray, t);
+      const bwDecoded = jsQR(bw.data, bw.width, bw.height, {
+        inversionAttempts: "attemptBoth",
+      });
+      if (bwDecoded) return bwDecoded;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -331,6 +384,11 @@ function stopRealtimeJsQrFallback() {
 }
 
 function stopAutoCameraCycleFallback() {
+  if (autoCameraCycleStartTimeoutId) {
+    clearTimeout(autoCameraCycleStartTimeoutId);
+    autoCameraCycleStartTimeoutId = null;
+  }
+
   if (autoCameraCycleIntervalId) {
     clearInterval(autoCameraCycleIntervalId);
     autoCameraCycleIntervalId = null;
@@ -368,47 +426,51 @@ function startAutoCameraCycleFallback() {
   if (cursor < 0) cursor = 0;
 
   stopAutoCameraCycleFallback();
-  autoCameraCycleIntervalId = setInterval(() => {
-    if (scannedResult) {
-      stopAutoCameraCycleFallback();
-      return;
-    }
+  autoCameraCycleStartTimeoutId = setTimeout(() => {
+    if (scannedResult) return;
 
-    if (autoCameraSwitchInProgress) return;
+    autoCameraCycleIntervalId = setInterval(() => {
+      if (scannedResult) {
+        stopAutoCameraCycleFallback();
+        return;
+      }
 
-    cursor = (cursor + 1) % cameraCandidates.length;
-    const nextOption = cameraCandidates[cursor];
-    if (!nextOption || nextOption.value === cameraSelect.value) return;
+      if (autoCameraSwitchInProgress) return;
 
-    autoCameraSwitchInProgress = true;
-    const stopBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /stop|hentikan/i.test(btn.textContent || ""));
-    const startBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
+      cursor = (cursor + 1) % cameraCandidates.length;
+      const nextOption = cameraCandidates[cursor];
+      if (!nextOption || nextOption.value === cameraSelect.value) return;
 
-    if (stopBtn && !stopBtn.disabled) {
-      stopBtn.click();
-    }
+      autoCameraSwitchInProgress = true;
+      const stopBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /stop|hentikan/i.test(btn.textContent || ""));
+      const startBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
 
-    setTimeout(() => {
-      switchToCameraOption(cameraSelect, nextOption);
+      if (stopBtn && !stopBtn.disabled) {
+        stopBtn.click();
+      }
 
       setTimeout(() => {
-        const liveStartBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
-        if (liveStartBtn && !liveStartBtn.disabled) {
-          liveStartBtn.click();
-          scheduleFocusEnhancement();
-          stabilizeScannerForCard();
-          startRealtimeJsQrFallback();
-        } else if (startBtn && !startBtn.disabled) {
-          startBtn.click();
-          scheduleFocusEnhancement();
-          stabilizeScannerForCard();
-          startRealtimeJsQrFallback();
-        }
+        switchToCameraOption(cameraSelect, nextOption);
 
-        autoCameraSwitchInProgress = false;
-      }, 260);
-    }, 240);
-  }, 6000);
+        setTimeout(() => {
+          const liveStartBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
+          if (liveStartBtn && !liveStartBtn.disabled) {
+            liveStartBtn.click();
+            scheduleFocusEnhancement();
+            stabilizeScannerForCard();
+            startRealtimeJsQrFallback();
+          } else if (startBtn && !startBtn.disabled) {
+            startBtn.click();
+            scheduleFocusEnhancement();
+            stabilizeScannerForCard();
+            startRealtimeJsQrFallback();
+          }
+
+          autoCameraSwitchInProgress = false;
+        }, 260);
+      }, 240);
+    }, 10000);
+  }, 14000);
 }
 
 function tryRealtimeJsQrFallbackOnce() {
@@ -437,7 +499,7 @@ function tryRealtimeJsQrFallbackOnce() {
 
     // 2) Kalau belum dapat, coba beberapa crop tengah dan upscale.
     if (!code) {
-      const cropScales = [0.65, 0.52, 0.42, 0.34];
+      const cropScales = [0.65, 0.52, 0.42, 0.34, 0.28, 0.22];
       for (const scale of cropScales) {
         const cw = Math.floor(vw * scale);
         const ch = Math.floor(vh * scale);
