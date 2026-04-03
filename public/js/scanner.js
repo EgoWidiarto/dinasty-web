@@ -9,16 +9,48 @@ let currentZoomLevel = 1;
 let lastTouchDistance = 0;
 let realtimeFallbackIntervalId = null;
 let fallbackFrameBusy = false;
+let autoCameraCycleIntervalId = null;
+let autoCameraSwitchInProgress = false;
 const MAX_SAFE_ZOOM_FRACTION = 0.35;
 const CARD_SCAN_QRBLOCK_MOBILE = { width: 170, height: 170 };
 const CARD_SCAN_QRBLOCK_DESKTOP = { width: 220, height: 220 };
-const DEFAULT_START_ZOOM_LEVEL = 0.18;
 
-function isMobileDevice() {
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+function scoreCameraOption(opt, isMobile) {
+  const label = (opt.textContent || "").toLowerCase();
+  const value = (opt.value || "").toLowerCase();
+  let score = 0;
+
+  // Prioritas utama: kamera belakang / environment
+  if (/back|rear|environment|belakang|world|main camera/.test(label)) score += 120;
+  if (/main|primary|default|wide/.test(label)) score += 30;
+  if (/front|selfie|user|depan/.test(label)) score -= 90;
+
+  // Prioritas kualitas kamera
+  if (/4k|2160|uhd/.test(label)) score += 25;
+  if (/1080|full hd|fhd/.test(label)) score += 20;
+  if (/720|hd/.test(label)) score += 10;
+  if (/wide|ultra wide|tele|macro/.test(label)) score += 8;
+  if (/48mp|64mp|108mp|12mp|13mp|main|primary|rear camera 0|camera 0/.test(label)) score += 18;
+
+  // Hindari virtual camera di desktop
+  if (/virtual|obs|droidcam|epoccam/.test(label)) score -= 80;
+
+  // Hindari kamera selfie / secondary lens yang sering lebih buruk kualitasnya
+  if (/ultra wide/.test(label)) score -= 5;
+  if (/tele|macro/.test(label)) score -= 5;
+
+  // Kalau browser menampilkan index device, kamera pertama biasanya kamera utama di banyak perangkat
+  if (/camera 0|device 0|id 0|0$/.test(value)) score += 12;
+  if (/camera 1|device 1|id 1|1$/.test(value)) score -= 3;
+
+  // Mobile: dorong kamera belakang lebih agresif
+  if (isMobile && /back|rear|environment|belakang|world/.test(label)) score += 40;
+  if (isMobile && /main|primary|default/.test(label)) score += 15;
+
+  return score;
 }
 
-function pickOptimalCameraOption(options, isMobile) {
+function getRankedCameraOptions(options, isMobile) {
   const validOptions = options.filter((opt) => {
     const value = (opt.value || "").trim();
     const label = (opt.textContent || "").toLowerCase();
@@ -27,47 +59,24 @@ function pickOptimalCameraOption(options, isMobile) {
     return true;
   });
 
-  if (validOptions.length === 0) {
-    return null;
-  }
+  if (validOptions.length === 0) return [];
 
-  const scored = validOptions.map((opt) => {
-    const label = (opt.textContent || "").toLowerCase();
-    const value = (opt.value || "").toLowerCase();
-    let score = 0;
-
-    // Prioritas utama: kamera belakang / environment
-    if (/back|rear|environment|belakang|world|main camera/.test(label)) score += 120;
-    if (/main|primary|default|wide/.test(label)) score += 30;
-    if (/front|selfie|user|depan/.test(label)) score -= 90;
-
-    // Prioritas kualitas kamera
-    if (/4k|2160|uhd/.test(label)) score += 25;
-    if (/1080|full hd|fhd/.test(label)) score += 20;
-    if (/720|hd/.test(label)) score += 10;
-    if (/wide|ultra wide|tele|macro/.test(label)) score += 8;
-    if (/48mp|64mp|108mp|12mp|13mp|main|primary|rear camera 0|camera 0/.test(label)) score += 18;
-
-    // Hindari virtual camera di desktop
-    if (/virtual|obs|droidcam|epoccam/.test(label)) score -= 80;
-
-    // Hindari kamera selfie / secondary lens yang sering lebih buruk kualitasnya
-    if (/ultra wide/.test(label)) score -= 5;
-    if (/tele|macro/.test(label)) score -= 5;
-
-    // Kalau browser menampilkan index device, kamera pertama biasanya kamera utama di banyak perangkat
-    if (/camera 0|device 0|id 0|0$/.test(value)) score += 12;
-    if (/camera 1|device 1|id 1|1$/.test(value)) score -= 3;
-
-    // Mobile: dorong kamera belakang lebih agresif
-    if (isMobile && /back|rear|environment|belakang|world/.test(label)) score += 40;
-    if (isMobile && /main|primary|default/.test(label)) score += 15;
-
-    return { opt, score };
-  });
+  const scored = validOptions.map((opt) => ({
+    opt,
+    score: scoreCameraOption(opt, isMobile),
+  }));
 
   scored.sort((a, b) => b.score - a.score);
-  return scored[0]?.opt || validOptions[0];
+  return scored.map((item) => item.opt);
+}
+
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function pickOptimalCameraOption(options, isMobile) {
+  const ranked = getRankedCameraOptions(options, isMobile);
+  return ranked[0] || null;
 }
 
 function getInnerHtml5QrcodeInstance() {
@@ -138,6 +147,11 @@ async function applyFocusEnhancements() {
 
     if (Array.isArray(capabilities?.whiteBalanceMode) && capabilities.whiteBalanceMode.includes("continuous")) {
       advanced.push({ whiteBalanceMode: "continuous" });
+    }
+
+    // Untuk QR yang didekatkan ke kamera: dorong fokus ke jarak dekat jika didukung.
+    if (capabilities?.focusDistance && Number.isFinite(capabilities.focusDistance.min)) {
+      advanced.push({ focusDistance: capabilities.focusDistance.min });
     }
 
     if (advanced.length === 0) return false;
@@ -292,9 +306,6 @@ function stabilizeScannerForCard() {
   runWhenScannerReady(() => {
     scheduleFocusEnhancement();
     setTimeout(() => {
-      applyZoomLevel(DEFAULT_START_ZOOM_LEVEL);
-    }, 500);
-    setTimeout(() => {
       scheduleFocusEnhancement();
     }, 1200);
   });
@@ -319,8 +330,89 @@ function stopRealtimeJsQrFallback() {
   }
 }
 
+function stopAutoCameraCycleFallback() {
+  if (autoCameraCycleIntervalId) {
+    clearInterval(autoCameraCycleIntervalId);
+    autoCameraCycleIntervalId = null;
+  }
+  autoCameraSwitchInProgress = false;
+}
+
+function switchToCameraOption(cameraSelect, nextOption) {
+  if (!cameraSelect || !nextOption) return;
+  if (cameraSelect.value !== nextOption.value) {
+    cameraSelect.value = nextOption.value;
+    cameraSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
+function startAutoCameraCycleFallback() {
+  if (!isMobileDevice()) return;
+
+  const readerEl = document.getElementById("reader");
+  if (!readerEl) return;
+
+  const cameraSelect = readerEl.querySelector("select");
+  if (!cameraSelect || cameraSelect.options.length <= 1) return;
+
+  const rankedOptions = getRankedCameraOptions(Array.from(cameraSelect.options), true);
+  if (rankedOptions.length <= 1) return;
+
+  const prioritized = rankedOptions.filter((opt) => {
+    const label = (opt.textContent || "").toLowerCase();
+    return !/front|selfie|user|depan/.test(label);
+  });
+
+  const cameraCandidates = prioritized.length > 0 ? prioritized : rankedOptions;
+  let cursor = cameraCandidates.findIndex((opt) => opt.value === cameraSelect.value);
+  if (cursor < 0) cursor = 0;
+
+  stopAutoCameraCycleFallback();
+  autoCameraCycleIntervalId = setInterval(() => {
+    if (scannedResult) {
+      stopAutoCameraCycleFallback();
+      return;
+    }
+
+    if (autoCameraSwitchInProgress) return;
+
+    cursor = (cursor + 1) % cameraCandidates.length;
+    const nextOption = cameraCandidates[cursor];
+    if (!nextOption || nextOption.value === cameraSelect.value) return;
+
+    autoCameraSwitchInProgress = true;
+    const stopBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /stop|hentikan/i.test(btn.textContent || ""));
+    const startBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
+
+    if (stopBtn && !stopBtn.disabled) {
+      stopBtn.click();
+    }
+
+    setTimeout(() => {
+      switchToCameraOption(cameraSelect, nextOption);
+
+      setTimeout(() => {
+        const liveStartBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
+        if (liveStartBtn && !liveStartBtn.disabled) {
+          liveStartBtn.click();
+          scheduleFocusEnhancement();
+          stabilizeScannerForCard();
+          startRealtimeJsQrFallback();
+        } else if (startBtn && !startBtn.disabled) {
+          startBtn.click();
+          scheduleFocusEnhancement();
+          stabilizeScannerForCard();
+          startRealtimeJsQrFallback();
+        }
+
+        autoCameraSwitchInProgress = false;
+      }, 260);
+    }, 240);
+  }, 6000);
+}
+
 function tryRealtimeJsQrFallbackOnce() {
-  if (fallbackFrameBusy || scannedResult) return;
+  if (fallbackFrameBusy || scannedResult || !isScannerRunning()) return;
   fallbackFrameBusy = true;
 
   try {
@@ -381,10 +473,10 @@ function startRealtimeJsQrFallback() {
 
   // Beri delay kecil sampai video kamera benar-benar siap.
   setTimeout(() => {
-    if (scannedResult) return;
+    if (scannedResult || !isScannerRunning()) return;
     realtimeFallbackIntervalId = setInterval(() => {
       tryRealtimeJsQrFallbackOnce();
-    }, 320);
+    }, 550);
   }, 1000);
 }
 
@@ -552,6 +644,7 @@ function autoSelectBackCameraAndStart() {
       hasAutoStartedScanner = true;
       startButtonAfterSelect.click();
       scheduleFocusEnhancement();
+      startAutoCameraCycleFallback();
       stopScannerUiBootstrap();
     }
   }, 120);
@@ -679,15 +772,15 @@ function initializeScanner() {
     const isMobile = isMobileDevice();
 
     const scannerConfig = {
-      fps: isMobile ? 18 : 20,
+      fps: isMobile ? 12 : 20,
       qrbox: getScannerQrBox(isMobile),
       rememberLastUsedCamera: false,
       showTorchButtonIfSupported: true,
       aspectRatio: isMobile ? 1.3333333 : 1.3333333,
       videoConstraints: {
         facingMode: { ideal: "environment" },
-        width: { ideal: isMobile ? 1600 : 1920, min: 960 },
-        height: { ideal: isMobile ? 1200 : 1440, min: 720 },
+        width: { ideal: isMobile ? 1920 : 1920, min: 1280 },
+        height: { ideal: isMobile ? 1440 : 1440, min: 720 },
       },
       disableFlip: true,
       experimentalFeatures: {
@@ -727,6 +820,7 @@ function showError(message) {
 function onScanSuccess(decodedText, decodedResult) {
   console.log("✅ QR Code terdeteksi:", decodedText);
   stopRealtimeJsQrFallback();
+  stopAutoCameraCycleFallback();
 
   // Stop scanning only if scanner is running
   if (html5QrcodeScanner) {
@@ -800,6 +894,7 @@ function resetScanner() {
     scheduleFocusEnhancement();
     stabilizeScannerForCard();
     startRealtimeJsQrFallback();
+    startAutoCameraCycleFallback();
   }
 }
 
@@ -962,6 +1057,7 @@ window.addEventListener("beforeunload", () => {
   stopScannerUiBootstrap();
   stopAdaptiveAutoZoom();
   stopRealtimeJsQrFallback();
+  stopAutoCameraCycleFallback();
   if (html5QrcodeScanner) {
     html5QrcodeScanner.clear();
   }
