@@ -75,6 +75,34 @@ function getInnerHtml5QrcodeInstance() {
   return html5QrcodeScanner.html5Qrcode || html5QrcodeScanner.html5Qrcode_ || null;
 }
 
+function isScannerRunning() {
+  if (!html5QrcodeScanner || typeof html5QrcodeScanner.getState !== "function") return false;
+
+  try {
+    return html5QrcodeScanner.getState() === Html5QrcodeScannerState.SCANNING;
+  } catch {
+    return false;
+  }
+}
+
+function runWhenScannerReady(action, timeoutMs = 5000) {
+  const startedAt = Date.now();
+
+  const attempt = () => {
+    if (scannedResult) return;
+
+    if (isScannerRunning()) {
+      action();
+      return;
+    }
+
+    if (Date.now() - startedAt >= timeoutMs) return;
+    setTimeout(attempt, 250);
+  };
+
+  attempt();
+}
+
 function getSafeMaxZoom(capabilities) {
   const min = Number.isFinite(capabilities?.zoom?.min) ? capabilities.zoom.min : 1;
   const max = Number.isFinite(capabilities?.zoom?.max) ? capabilities.zoom.max : min;
@@ -85,6 +113,8 @@ function getSafeMaxZoom(capabilities) {
 }
 
 async function applyFocusEnhancements() {
+  if (!isScannerRunning()) return false;
+
   const inner = getInnerHtml5QrcodeInstance();
   if (!inner || typeof inner.applyVideoConstraints !== "function" || typeof inner.getRunningTrackCapabilities !== "function") {
     return false;
@@ -122,9 +152,11 @@ async function applyFocusEnhancements() {
 
 function scheduleFocusEnhancement() {
   // Beri waktu agar stream kamera sudah aktif sebelum set constraint fokus.
-  setTimeout(() => {
-    applyFocusEnhancements();
-  }, 900);
+  runWhenScannerReady(() => {
+    setTimeout(() => {
+      applyFocusEnhancements();
+    }, 300);
+  });
 }
 
 function getScannerQrBox(isMobile) {
@@ -132,6 +164,8 @@ function getScannerQrBox(isMobile) {
 }
 
 async function applyZoomLevel(level) {
+  if (!isScannerRunning()) return false;
+
   const inner = getInnerHtml5QrcodeInstance();
   if (!inner || typeof inner.getRunningTrackCapabilities !== "function" || typeof inner.applyVideoConstraints !== "function") {
     return false;
@@ -158,6 +192,8 @@ async function applyZoomLevel(level) {
 }
 
 async function increaseZoom() {
+  if (!isScannerRunning()) return;
+
   const inner = getInnerHtml5QrcodeInstance();
   if (!inner || typeof inner.getRunningTrackCapabilities !== "function") return;
 
@@ -180,6 +216,8 @@ async function increaseZoom() {
 }
 
 async function decreaseZoom() {
+  if (!isScannerRunning()) return;
+
   const inner = getInnerHtml5QrcodeInstance();
   if (!inner || typeof inner.getRunningTrackCapabilities !== "function") return;
 
@@ -251,13 +289,15 @@ function startAdaptiveAutoZoom() {
 
 function stabilizeScannerForCard() {
   // Coba refocus beberapa kali awal agar kamera lebih cepat lock ke QR kecil di kartu.
-  scheduleFocusEnhancement();
-  setTimeout(() => {
-    applyZoomLevel(DEFAULT_START_ZOOM_LEVEL);
-  }, 1100);
-  setTimeout(() => {
+  runWhenScannerReady(() => {
     scheduleFocusEnhancement();
-  }, 1800);
+    setTimeout(() => {
+      applyZoomLevel(DEFAULT_START_ZOOM_LEVEL);
+    }, 500);
+    setTimeout(() => {
+      scheduleFocusEnhancement();
+    }, 1200);
+  });
 }
 
 function decodeQrFromImageData(imageData) {
