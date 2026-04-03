@@ -8,8 +8,9 @@ let hasAutoStartedScanner = false;
 let currentZoomLevel = 1;
 let lastTouchDistance = 0;
 const MAX_SAFE_ZOOM_FRACTION = 0.35;
-const CARD_SCAN_QRBLOCK_MOBILE = { width: 220, height: 220 };
-const CARD_SCAN_QRBLOCK_DESKTOP = { width: 260, height: 260 };
+const CARD_SCAN_QRBLOCK_MOBILE = { width: 170, height: 170 };
+const CARD_SCAN_QRBLOCK_DESKTOP = { width: 220, height: 220 };
+const DEFAULT_START_ZOOM_LEVEL = 0.18;
 
 function isMobileDevice() {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -249,6 +250,9 @@ function startAdaptiveAutoZoom() {
 function stabilizeScannerForCard() {
   // Coba refocus beberapa kali awal agar kamera lebih cepat lock ke QR kecil di kartu.
   scheduleFocusEnhancement();
+  setTimeout(() => {
+    applyZoomLevel(DEFAULT_START_ZOOM_LEVEL);
+  }, 1100);
   setTimeout(() => {
     scheduleFocusEnhancement();
   }, 1800);
@@ -545,15 +549,19 @@ function initializeScanner() {
     const isMobile = isMobileDevice();
 
     const scannerConfig = {
-      fps: isMobile ? 15 : 20, // Lebih tinggi untuk deteksi lebih cepat
+      fps: isMobile ? 18 : 20,
       qrbox: getScannerQrBox(isMobile),
       rememberLastUsedCamera: false,
       showTorchButtonIfSupported: true,
-      aspectRatio: isMobile ? 1.7777778 : 1.3333333,
+      aspectRatio: isMobile ? 1.3333333 : 1.3333333,
       videoConstraints: {
         facingMode: { ideal: "environment" },
-        width: { ideal: isMobile ? 1920 : 2560, min: 1280 },
-        height: { ideal: isMobile ? 1080 : 1440, min: 720 },
+        width: { ideal: isMobile ? 1600 : 1920, min: 960 },
+        height: { ideal: isMobile ? 1200 : 1440, min: 720 },
+      },
+      disableFlip: true,
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true,
       },
       // Force camera untuk mobile
       formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
