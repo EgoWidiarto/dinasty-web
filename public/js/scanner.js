@@ -7,6 +7,7 @@ let scannerUiBootstrapAttempts = 0;
 let hasAutoStartedScanner = false;
 let currentZoomLevel = 1;
 let lastTouchDistance = 0;
+let alternativeQrReader = null;
 let alternativeQrScanner = null;
 let usingAlternativeScanner = false;
 let alternativeScannerStarted = false;
@@ -114,24 +115,34 @@ function setZoomControlsEnabled(enabled) {
 }
 
 async function stopAlternativeScanner() {
-  if (!alternativeQrScanner) {
+  if (!alternativeQrScanner && !alternativeQrReader) {
     alternativeScannerStarted = false;
     usingAlternativeScanner = false;
     return;
   }
 
   try {
-    await alternativeQrScanner.stop();
+    if (alternativeQrScanner && typeof alternativeQrScanner.stop === "function") {
+      await alternativeQrScanner.stop();
+    }
   } catch {
     // ignore
   }
 
   try {
-    alternativeQrScanner.destroy();
+    if (alternativeQrReader && typeof alternativeQrReader.reset === "function") {
+      alternativeQrReader.reset();
+    }
   } catch {
     // ignore
   }
 
+  const readerEl = document.getElementById("reader");
+  if (readerEl) {
+    readerEl.innerHTML = "";
+  }
+
+  alternativeQrReader = null;
   alternativeQrScanner = null;
   alternativeScannerStarted = false;
   usingAlternativeScanner = false;
@@ -165,7 +176,7 @@ function setupAlternativeCameraEnhancements(videoEl) {
 }
 
 async function initializeAlternativeScanner() {
-  if (typeof QrScanner === "undefined") return false;
+  if (typeof ZXingBrowser === "undefined") return false;
 
   const readerEl = document.getElementById("reader");
   if (!readerEl) return false;
@@ -182,6 +193,9 @@ async function initializeAlternativeScanner() {
   }
 
   readerEl.innerHTML = "";
+  readerEl.style.background = "#000";
+  readerEl.style.aspectRatio = "3 / 4";
+
   const altVideo = document.createElement("video");
   altVideo.id = "altQrVideo";
   altVideo.setAttribute("playsinline", "true");
@@ -192,27 +206,26 @@ async function initializeAlternativeScanner() {
   altVideo.style.objectFit = "cover";
   readerEl.appendChild(altVideo);
 
-  QrScanner.WORKER_PATH = "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js";
-
-  alternativeQrScanner = new QrScanner(
-    altVideo,
-    (result) => {
-      const decoded = typeof result === "string" ? result : result?.data;
-      if (decoded) {
-        onScanSuccess(decoded, { source: "qr-scanner-alt" });
-      }
-    },
-    {
-      preferredCamera: "environment",
-      maxScansPerSecond: 18,
-      returnDetailedScanResult: true,
-      highlightScanRegion: false,
-      highlightCodeOutline: false,
-    },
-  );
+  alternativeQrReader = new ZXingBrowser.BrowserQRCodeReader();
 
   try {
-    await alternativeQrScanner.start();
+    alternativeQrScanner = await alternativeQrReader.decodeFromConstraints(
+      {
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 2560 },
+          height: { ideal: 1920 },
+          aspectRatio: { ideal: 0.75 },
+        },
+      },
+      altVideo,
+      (result, err) => {
+        if (result) {
+          onScanSuccess(result.getText(), { source: "zxing-alt" });
+        }
+      },
+    );
     usingAlternativeScanner = true;
     alternativeScannerStarted = true;
     setZoomControlsEnabled(false);
@@ -961,15 +974,15 @@ async function initializeScanner() {
   try {
     if (typeof Html5QrcodeScanner === "undefined" || typeof Html5QrcodeSupportedFormats === "undefined") {
       showError("Library scanner gagal dimuat. Tutup tab lalu buka lagi.");
-      return;
+      return false;
     }
 
     // Prioritaskan engine alternatif di mobile untuk QR kecil.
-    if (isMobileDevice() && typeof QrScanner !== "undefined") {
+    if (isMobileDevice() && typeof ZXingBrowser !== "undefined") {
       const altOk = await initializeAlternativeScanner();
       if (altOk) {
         console.log("✅ Alternative scanner initialized successfully");
-        return;
+        return true;
       }
     }
 
@@ -1008,9 +1021,11 @@ async function initializeScanner() {
     stabilizeScannerForCard();
     startRealtimeJsQrFallback();
     console.log("✅ Scanner initialized successfully");
+    return true;
   } catch (error) {
     console.error("❌ Error initializing scanner:", error);
     showError("Gagal memulai scanner. Mohon refresh halaman.");
+    return false;
   }
 }
 
@@ -1087,7 +1102,7 @@ async function copyPayload() {
   }
 }
 
-function resetScanner() {
+async function resetScanner() {
   document.getElementById("resultContainer").classList.add("d-none");
   document.getElementById("statusMessage").innerHTML = "";
   const payloadTypeEl = document.getElementById("payloadType");
@@ -1098,14 +1113,11 @@ function resetScanner() {
 
   // Resume scanning
   if (usingAlternativeScanner && alternativeQrScanner) {
-    alternativeQrScanner
-      .start()
-      .then(() => {
-        alternativeScannerStarted = true;
-      })
-      .catch(() => {
-        showError("Kamera gagal dijalankan ulang. Coba refresh halaman.");
-      });
+    await stopAlternativeScanner();
+    const started = await initializeScanner();
+    if (!started) {
+      showError("Kamera gagal dijalankan ulang. Coba refresh halaman.");
+    }
   } else if (html5QrcodeScanner) {
     html5QrcodeScanner.resume();
     scheduleFocusEnhancement();
