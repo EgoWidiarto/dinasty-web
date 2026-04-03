@@ -7,6 +7,8 @@ let scannerUiBootstrapAttempts = 0;
 let hasAutoStartedScanner = false;
 let currentZoomLevel = 1;
 let lastTouchDistance = 0;
+let realtimeFallbackIntervalId = null;
+let fallbackFrameBusy = false;
 const MAX_SAFE_ZOOM_FRACTION = 0.35;
 const CARD_SCAN_QRBLOCK_MOBILE = { width: 170, height: 170 };
 const CARD_SCAN_QRBLOCK_DESKTOP = { width: 220, height: 220 };
@@ -256,6 +258,94 @@ function stabilizeScannerForCard() {
   setTimeout(() => {
     scheduleFocusEnhancement();
   }, 1800);
+}
+
+function decodeQrFromImageData(imageData) {
+  if (typeof jsQR === "undefined" || !imageData) return null;
+
+  try {
+    return jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: "attemptBoth",
+    });
+  } catch {
+    return null;
+  }
+}
+
+function stopRealtimeJsQrFallback() {
+  if (realtimeFallbackIntervalId) {
+    clearInterval(realtimeFallbackIntervalId);
+    realtimeFallbackIntervalId = null;
+  }
+}
+
+function tryRealtimeJsQrFallbackOnce() {
+  if (fallbackFrameBusy || scannedResult) return;
+  fallbackFrameBusy = true;
+
+  try {
+    const readerEl = document.getElementById("reader");
+    const videoEl = readerEl ? readerEl.querySelector("video") : null;
+    if (!videoEl || videoEl.readyState < 2) return;
+
+    const vw = videoEl.videoWidth || 0;
+    const vh = videoEl.videoHeight || 0;
+    if (!vw || !vh) return;
+
+    const srcCanvas = document.createElement("canvas");
+    srcCanvas.width = vw;
+    srcCanvas.height = vh;
+    const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
+    if (!srcCtx) return;
+
+    srcCtx.drawImage(videoEl, 0, 0, vw, vh);
+
+    // 1) Coba full-frame dulu.
+    let code = decodeQrFromImageData(srcCtx.getImageData(0, 0, vw, vh));
+
+    // 2) Kalau belum dapat, coba beberapa crop tengah dan upscale.
+    if (!code) {
+      const cropScales = [0.65, 0.52, 0.42, 0.34];
+      for (const scale of cropScales) {
+        const cw = Math.floor(vw * scale);
+        const ch = Math.floor(vh * scale);
+        const sx = Math.floor((vw - cw) / 2);
+        const sy = Math.floor((vh - ch) / 2);
+
+        const upscaleCanvas = document.createElement("canvas");
+        upscaleCanvas.width = 900;
+        upscaleCanvas.height = 900;
+        const upscaleCtx = upscaleCanvas.getContext("2d", { willReadFrequently: true });
+        if (!upscaleCtx) continue;
+
+        upscaleCtx.imageSmoothingEnabled = false;
+        upscaleCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, upscaleCanvas.width, upscaleCanvas.height);
+
+        code = decodeQrFromImageData(upscaleCtx.getImageData(0, 0, upscaleCanvas.width, upscaleCanvas.height));
+        if (code) break;
+      }
+    }
+
+    if (code && code.data) {
+      console.log("✅ QR Code terdeteksi via fallback jsQR:", code.data);
+      onScanSuccess(code.data, { source: "jsqr-fallback" });
+    }
+  } finally {
+    fallbackFrameBusy = false;
+  }
+}
+
+function startRealtimeJsQrFallback() {
+  if (typeof jsQR === "undefined") return;
+  stopRealtimeJsQrFallback();
+
+  // Beri delay kecil sampai video kamera benar-benar siap.
+  setTimeout(() => {
+    if (scannedResult) return;
+    realtimeFallbackIntervalId = setInterval(() => {
+      tryRealtimeJsQrFallbackOnce();
+    }, 320);
+  }, 1000);
 }
 
 function stopAdaptiveAutoZoom() {
@@ -578,6 +668,7 @@ function initializeScanner() {
     startScannerUiBootstrap();
     setupPinchToZoom();
     stabilizeScannerForCard();
+    startRealtimeJsQrFallback();
     console.log("✅ Scanner initialized successfully");
   } catch (error) {
     console.error("❌ Error initializing scanner:", error);
@@ -595,6 +686,7 @@ function showError(message) {
 
 function onScanSuccess(decodedText, decodedResult) {
   console.log("✅ QR Code terdeteksi:", decodedText);
+  stopRealtimeJsQrFallback();
 
   // Stop scanning only if scanner is running
   if (html5QrcodeScanner) {
@@ -667,6 +759,7 @@ function resetScanner() {
     html5QrcodeScanner.resume();
     scheduleFocusEnhancement();
     stabilizeScannerForCard();
+    startRealtimeJsQrFallback();
   }
 }
 
@@ -828,6 +921,7 @@ window.addEventListener("load", () => {
 window.addEventListener("beforeunload", () => {
   stopScannerUiBootstrap();
   stopAdaptiveAutoZoom();
+  stopRealtimeJsQrFallback();
   if (html5QrcodeScanner) {
     html5QrcodeScanner.clear();
   }
