@@ -57,6 +57,41 @@ function getInnerHtml5QrcodeInstance() {
   return html5QrcodeScanner.html5Qrcode || html5QrcodeScanner.html5Qrcode_ || null;
 }
 
+async function applyFocusEnhancements() {
+  const inner = getInnerHtml5QrcodeInstance();
+  if (!inner || typeof inner.applyVideoConstraints !== "function" || typeof inner.getRunningTrackCapabilities !== "function") {
+    return false;
+  }
+
+  try {
+    const capabilities = inner.getRunningTrackCapabilities();
+    const advanced = [];
+
+    if (Array.isArray(capabilities?.focusMode)) {
+      if (capabilities.focusMode.includes("continuous")) {
+        advanced.push({ focusMode: "continuous" });
+      } else if (capabilities.focusMode.includes("single-shot")) {
+        advanced.push({ focusMode: "single-shot" });
+      }
+    }
+
+    if (advanced.length === 0) return false;
+
+    await inner.applyVideoConstraints({ advanced });
+    return true;
+  } catch (err) {
+    console.warn("Fitur autofocus tidak didukung kamera/browser:", err);
+    return false;
+  }
+}
+
+function scheduleFocusEnhancement() {
+  // Beri waktu agar stream kamera sudah aktif sebelum set constraint fokus.
+  setTimeout(() => {
+    applyFocusEnhancements();
+  }, 900);
+}
+
 async function applyZoomLevel(level) {
   const inner = getInnerHtml5QrcodeInstance();
   if (!inner || typeof inner.getRunningTrackCapabilities !== "function" || typeof inner.applyVideoConstraints !== "function") {
@@ -335,6 +370,7 @@ function autoSelectBackCameraAndStart() {
     if (startButtonAfterSelect && !startButtonAfterSelect.disabled) {
       hasAutoStartedScanner = true;
       startButtonAfterSelect.click();
+      scheduleFocusEnhancement();
       stopScannerUiBootstrap();
     }
   }, 120);
@@ -466,11 +502,11 @@ function initializeScanner() {
       qrbox: isMobile ? { width: 280, height: 280 } : { width: 350, height: 350 }, // Qr box lebih besar
       rememberLastUsedCamera: false,
       showTorchButtonIfSupported: true,
-      aspectRatio: 1.0,
+      aspectRatio: isMobile ? 1.7777778 : 1.3333333,
       videoConstraints: {
         facingMode: { ideal: "environment" },
-        width: { ideal: 1280 }, // Resolusi lebih tinggi
-        height: { ideal: 1280 },
+        width: { ideal: isMobile ? 1920 : 1280 },
+        height: { ideal: isMobile ? 1080 : 720 },
       },
       // Force camera untuk mobile
       formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
@@ -573,6 +609,7 @@ function resetScanner() {
   // Resume scanning
   if (html5QrcodeScanner) {
     html5QrcodeScanner.resume();
+    scheduleFocusEnhancement();
   }
 }
 
@@ -683,6 +720,7 @@ window.addEventListener("load", () => {
                 if (wasScannerPaused && html5QrcodeScanner) {
                   try {
                     html5QrcodeScanner.resume();
+                    scheduleFocusEnhancement();
                   } catch (e) {
                     console.warn("Could not resume scanner:", e);
                   }
@@ -703,6 +741,7 @@ window.addEventListener("load", () => {
               if (wasScannerPaused && html5QrcodeScanner) {
                 try {
                   html5QrcodeScanner.resume();
+                  scheduleFocusEnhancement();
                 } catch (e) {
                   console.warn("Could not resume scanner:", e);
                 }
