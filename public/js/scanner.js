@@ -7,6 +7,9 @@ let scannerUiBootstrapAttempts = 0;
 let hasAutoStartedScanner = false;
 let currentZoomLevel = 1;
 let lastTouchDistance = 0;
+const MAX_SAFE_ZOOM_FRACTION = 0.35;
+const CARD_SCAN_QRBLOCK_MOBILE = { width: 220, height: 220 };
+const CARD_SCAN_QRBLOCK_DESKTOP = { width: 260, height: 260 };
 
 function isMobileDevice() {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -69,6 +72,15 @@ function getInnerHtml5QrcodeInstance() {
   return html5QrcodeScanner.html5Qrcode || html5QrcodeScanner.html5Qrcode_ || null;
 }
 
+function getSafeMaxZoom(capabilities) {
+  const min = Number.isFinite(capabilities?.zoom?.min) ? capabilities.zoom.min : 1;
+  const max = Number.isFinite(capabilities?.zoom?.max) ? capabilities.zoom.max : min;
+  if (max <= min) return min;
+
+  const safeMax = min + (max - min) * MAX_SAFE_ZOOM_FRACTION;
+  return Math.max(min, Math.min(max, safeMax));
+}
+
 async function applyFocusEnhancements() {
   const inner = getInnerHtml5QrcodeInstance();
   if (!inner || typeof inner.applyVideoConstraints !== "function" || typeof inner.getRunningTrackCapabilities !== "function") {
@@ -85,6 +97,14 @@ async function applyFocusEnhancements() {
       } else if (capabilities.focusMode.includes("single-shot")) {
         advanced.push({ focusMode: "single-shot" });
       }
+    }
+
+    if (Array.isArray(capabilities?.exposureMode) && capabilities.exposureMode.includes("continuous")) {
+      advanced.push({ exposureMode: "continuous" });
+    }
+
+    if (Array.isArray(capabilities?.whiteBalanceMode) && capabilities.whiteBalanceMode.includes("continuous")) {
+      advanced.push({ whiteBalanceMode: "continuous" });
     }
 
     if (advanced.length === 0) return false;
@@ -104,6 +124,10 @@ function scheduleFocusEnhancement() {
   }, 900);
 }
 
+function getScannerQrBox(isMobile) {
+  return isMobile ? CARD_SCAN_QRBLOCK_MOBILE : CARD_SCAN_QRBLOCK_DESKTOP;
+}
+
 async function applyZoomLevel(level) {
   const inner = getInnerHtml5QrcodeInstance();
   if (!inner || typeof inner.getRunningTrackCapabilities !== "function" || typeof inner.applyVideoConstraints !== "function") {
@@ -115,13 +139,14 @@ async function applyZoomLevel(level) {
     if (!capabilities?.zoom) return false;
 
     const min = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
-    const max = Number.isFinite(capabilities.zoom.max) ? capabilities.zoom.max : min;
+    const max = getSafeMaxZoom(capabilities);
     if (max <= min) return false;
 
     const targetZoom = Math.max(min, Math.min(max, min + (max - min) * level));
     currentZoomLevel = targetZoom;
     await inner.applyVideoConstraints({ advanced: [{ zoom: targetZoom }] });
     updateZoomDisplay();
+    scheduleFocusEnhancement();
     return true;
   } catch (err) {
     console.warn("Zoom constraint tidak didukung kamera/browser:", err);
@@ -138,13 +163,14 @@ async function increaseZoom() {
     if (!capabilities?.zoom) return;
 
     const min = capabilities.zoom.min || 1;
-    const max = capabilities.zoom.max || min;
-    const step = (max - min) * 0.1; // 10% increment
+    const max = getSafeMaxZoom(capabilities);
+    const step = (max - min) * 0.08; // langkah kecil agar fokus tetap stabil
 
     const newZoom = Math.min(max, currentZoomLevel + step);
     await inner.applyVideoConstraints({ advanced: [{ zoom: newZoom }] });
     currentZoomLevel = newZoom;
     updateZoomDisplay();
+    scheduleFocusEnhancement();
   } catch (err) {
     console.warn("Zoom increase failed:", err);
   }
@@ -159,13 +185,14 @@ async function decreaseZoom() {
     if (!capabilities?.zoom) return;
 
     const min = capabilities.zoom.min || 1;
-    const max = capabilities.zoom.max || min;
-    const step = (max - min) * 0.1; // 10% decrement
+    const max = getSafeMaxZoom(capabilities);
+    const step = (max - min) * 0.08; // langkah kecil agar fokus tetap stabil
 
     const newZoom = Math.max(min, currentZoomLevel - step);
     await inner.applyVideoConstraints({ advanced: [{ zoom: newZoom }] });
     currentZoomLevel = newZoom;
     updateZoomDisplay();
+    scheduleFocusEnhancement();
   } catch (err) {
     console.warn("Zoom decrease failed:", err);
   }
@@ -217,6 +244,14 @@ function setupPinchToZoom() {
 function startAdaptiveAutoZoom() {
   // Auto zoom dinonaktifkan sesuai permintaan.
   stopAdaptiveAutoZoom();
+}
+
+function stabilizeScannerForCard() {
+  // Coba refocus beberapa kali awal agar kamera lebih cepat lock ke QR kecil di kartu.
+  scheduleFocusEnhancement();
+  setTimeout(() => {
+    scheduleFocusEnhancement();
+  }, 1800);
 }
 
 function stopAdaptiveAutoZoom() {
@@ -511,14 +546,14 @@ function initializeScanner() {
 
     const scannerConfig = {
       fps: isMobile ? 15 : 20, // Lebih tinggi untuk deteksi lebih cepat
-      qrbox: isMobile ? { width: 280, height: 280 } : { width: 350, height: 350 }, // Qr box lebih besar
+      qrbox: getScannerQrBox(isMobile),
       rememberLastUsedCamera: false,
       showTorchButtonIfSupported: true,
       aspectRatio: isMobile ? 1.7777778 : 1.3333333,
       videoConstraints: {
         facingMode: { ideal: "environment" },
-        width: { ideal: isMobile ? 2560 : 1920, min: 1280 },
-        height: { ideal: isMobile ? 1440 : 1080, min: 720 },
+        width: { ideal: isMobile ? 1920 : 2560, min: 1280 },
+        height: { ideal: isMobile ? 1080 : 1440, min: 720 },
       },
       // Force camera untuk mobile
       formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
@@ -534,6 +569,7 @@ function initializeScanner() {
     html5QrcodeScanner.render(onScanSuccess, onScanFailure);
     startScannerUiBootstrap();
     setupPinchToZoom();
+    stabilizeScannerForCard();
     console.log("✅ Scanner initialized successfully");
   } catch (error) {
     console.error("❌ Error initializing scanner:", error);
@@ -622,6 +658,7 @@ function resetScanner() {
   if (html5QrcodeScanner) {
     html5QrcodeScanner.resume();
     scheduleFocusEnhancement();
+    stabilizeScannerForCard();
   }
 }
 
