@@ -27,10 +27,12 @@ function pickOptimalCameraOption(options, isMobile) {
 
   const scored = validOptions.map((opt) => {
     const label = (opt.textContent || "").toLowerCase();
+    const value = (opt.value || "").toLowerCase();
     let score = 0;
 
     // Prioritas utama: kamera belakang / environment
     if (/back|rear|environment|belakang|world|main camera/.test(label)) score += 120;
+    if (/main|primary|default|wide/.test(label)) score += 30;
     if (/front|selfie|user|depan/.test(label)) score -= 90;
 
     // Prioritas kualitas kamera
@@ -38,12 +40,22 @@ function pickOptimalCameraOption(options, isMobile) {
     if (/1080|full hd|fhd/.test(label)) score += 20;
     if (/720|hd/.test(label)) score += 10;
     if (/wide|ultra wide|tele|macro/.test(label)) score += 8;
+    if (/48mp|64mp|108mp|12mp|13mp|main|primary|rear camera 0|camera 0/.test(label)) score += 18;
 
     // Hindari virtual camera di desktop
     if (/virtual|obs|droidcam|epoccam/.test(label)) score -= 80;
 
+    // Hindari kamera selfie / secondary lens yang sering lebih buruk kualitasnya
+    if (/ultra wide/.test(label)) score -= 5;
+    if (/tele|macro/.test(label)) score -= 5;
+
+    // Kalau browser menampilkan index device, kamera pertama biasanya kamera utama di banyak perangkat
+    if (/camera 0|device 0|id 0|0$/.test(value)) score += 12;
+    if (/camera 1|device 1|id 1|1$/.test(value)) score -= 3;
+
     // Mobile: dorong kamera belakang lebih agresif
     if (isMobile && /back|rear|environment|belakang|world/.test(label)) score += 40;
+    if (isMobile && /main|primary|default/.test(label)) score += 15;
 
     return { opt, score };
   });
@@ -505,8 +517,8 @@ function initializeScanner() {
       aspectRatio: isMobile ? 1.7777778 : 1.3333333,
       videoConstraints: {
         facingMode: { ideal: "environment" },
-        width: { ideal: isMobile ? 1920 : 1280 },
-        height: { ideal: isMobile ? 1080 : 720 },
+        width: { ideal: isMobile ? 2560 : 1920, min: 1280 },
+        height: { ideal: isMobile ? 1440 : 1080, min: 720 },
       },
       // Force camera untuk mobile
       formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
