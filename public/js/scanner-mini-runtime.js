@@ -1,4 +1,8 @@
-import QrScanner from "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js";
+const QrScanner = window.QrScanner;
+
+if (!QrScanner) {
+  throw new Error("QrScanner tidak tersedia di window. Pastikan vendor/qr-scanner.umd.min.js termuat.");
+}
 
 class DinastyMiniQrScanner {
   constructor() {

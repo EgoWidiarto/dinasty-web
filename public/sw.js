@@ -1,6 +1,18 @@
 // Service Worker
-const CACHE_NAME = "dinamika-v9";
-const urlsToCache = ["/", "/index.html", "/chatbot.html", "/scanner.html", "/css/style.css", "/js/app.js", "/js/chatbot.js", "/js/scanner-mini-runtime.js?v=20260404-3", "/manifest.json"];
+const CACHE_NAME = "dinamika-v10";
+const urlsToCache = [
+  "/",
+  "/index.html",
+  "/chatbot.html",
+  "/scanner.html",
+  "/css/style.css",
+  "/js/app.js",
+  "/js/chatbot.js",
+  "/js/scanner-mini-runtime.js?v=20260404-4",
+  "/vendor/qr-scanner.umd.min.js",
+  "/vendor/qr-scanner-worker.min.js",
+  "/manifest.json",
+];
 
 // Install event - skip waiting untuk langsung aktif
 self.addEventListener("install", (event) => {
