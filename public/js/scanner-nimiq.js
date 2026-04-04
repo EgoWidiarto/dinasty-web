@@ -1,10 +1,35 @@
-const QrScanner = window.QrScanner;
+let QrScanner = window.QrScanner;
 
-if (!QrScanner) {
-  throw new Error("QrScanner tidak tersedia. Pastikan script qr-scanner sudah dimuat.");
+async function ensureQrScannerLoaded() {
+  if (window.QrScanner) {
+    QrScanner = window.QrScanner;
+    return QrScanner;
+  }
+
+  const candidates = ["https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js", "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"];
+
+  for (const src of candidates) {
+    try {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Gagal memuat ${src}`));
+        document.head.appendChild(script);
+      });
+
+      if (window.QrScanner) {
+        QrScanner = window.QrScanner;
+        return QrScanner;
+      }
+    } catch {
+      // coba URL berikutnya
+    }
+  }
+
+  throw new Error("QrScanner tidak tersedia. Gagal memuat library qr-scanner.");
 }
-
-QrScanner.WORKER_PATH = "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js";
 
 class DinastyMiniQrScanner {
   constructor() {
@@ -509,6 +534,18 @@ class DinastyMiniQrScanner {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  const app = new DinastyMiniQrScanner();
-  app.start();
+  ensureQrScannerLoaded()
+    .then(() => {
+      QrScanner.WORKER_PATH = "https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js";
+      const app = new DinastyMiniQrScanner();
+      app.start();
+    })
+    .catch((err) => {
+      console.error(err);
+      const statusEl = document.getElementById("statusMessage");
+      if (statusEl) {
+        statusEl.className = "mt-4 text-center text-danger";
+        statusEl.textContent = "Library scanner gagal dimuat. Coba refresh halaman (Ctrl+F5).";
+      }
+    });
 });
