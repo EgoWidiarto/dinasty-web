@@ -5,10 +5,26 @@ let fallbackIntervalId = null;
 let fallbackBusy = false;
 let currentZoomLevel = 1;
 let scanStartedAt = 0;
+let fallbackPhase = 0;
+let fallbackRegionCursor = 0;
+
+const FALLBACK_INTERVAL_MS = 1300;
+const FALLBACK_UPSCALE_SIZE = 900;
+const FALLBACK_GRID = [
+  { x: 0.2, y: 0.2 },
+  { x: 0.5, y: 0.2 },
+  { x: 0.8, y: 0.2 },
+  { x: 0.2, y: 0.5 },
+  { x: 0.5, y: 0.5 },
+  { x: 0.8, y: 0.5 },
+  { x: 0.2, y: 0.8 },
+  { x: 0.5, y: 0.8 },
+  { x: 0.8, y: 0.8 },
+];
 
 const MINI_QR_CONFIG = {
-  mobile: { fps: 14, qrbox: { width: 170, height: 170 }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1440, min: 720 } },
-  desktop: { fps: 20, qrbox: { width: 220, height: 220 }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 } },
+  mobile: { fps: 12, qrbox: { width: 170, height: 170 }, width: { ideal: 1280, min: 960 }, height: { ideal: 960, min: 540 } },
+  desktop: { fps: 15, qrbox: { width: 220, height: 220 }, width: { ideal: 1280, min: 960 }, height: { ideal: 720, min: 540 } },
 };
 
 function isMobileDevice() {
@@ -246,7 +262,7 @@ function sharpen(imageData, amount = 0.85) {
   return out;
 }
 
-function decodeWithVariants(imageData) {
+function decodeWithVariants(imageData, mode = "normal") {
   if (typeof jsQR === "undefined" || !imageData) return null;
   try {
     const raw = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
@@ -255,6 +271,11 @@ function decodeWithVariants(imageData) {
     const gray = toGrayscale(imageData, 1.35);
     const grayHit = jsQR(gray.data, gray.width, gray.height, { inversionAttempts: "attemptBoth" });
     if (grayHit) return grayHit;
+
+    if (mode === "fast") {
+      const bw = toBinary(gray, 120);
+      return jsQR(bw.data, bw.width, bw.height, { inversionAttempts: "attemptBoth" });
+    }
 
     const sharp = sharpen(gray, 0.9);
     const sharpHit = jsQR(sharp.data, sharp.width, sharp.height, { inversionAttempts: "attemptBoth" });
@@ -295,50 +316,44 @@ function detectMiniQrFromVideoFrame() {
     if (!srcCtx) return;
     srcCtx.drawImage(video, 0, 0, vw, vh);
 
-    let hit = decodeWithVariants(srcCtx.getImageData(0, 0, vw, vh));
+    const up = document.createElement("canvas");
+    up.width = FALLBACK_UPSCALE_SIZE;
+    up.height = FALLBACK_UPSCALE_SIZE;
+    const upCtx = up.getContext("2d", { willReadFrequently: true });
+    if (!upCtx) return;
+    upCtx.imageSmoothingEnabled = false;
 
-    if (!hit) {
-      for (const s of [0.7, 0.55, 0.42, 0.32, 0.24, 0.18]) {
-        const cw = Math.floor(vw * s);
-        const ch = Math.floor(vh * s);
-        const sx = Math.floor((vw - cw) / 2);
-        const sy = Math.floor((vh - ch) / 2);
+    let hit = null;
 
-        const up = document.createElement("canvas");
-        up.width = 1200;
-        up.height = 1200;
-        const upCtx = up.getContext("2d", { willReadFrequently: true });
-        if (!upCtx) continue;
-        upCtx.imageSmoothingEnabled = false;
-        upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
-        hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height));
-        if (hit) break;
-      }
+    // Phase 0: full frame ringan
+    if (fallbackPhase === 0) {
+      hit = decodeWithVariants(srcCtx.getImageData(0, 0, vw, vh), "fast");
     }
 
-    if (!hit) {
-      const regions = [
-        { x: 0.18, y: 0.18 }, { x: 0.5, y: 0.18 }, { x: 0.82, y: 0.18 },
-        { x: 0.18, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.82, y: 0.5 },
-        { x: 0.18, y: 0.82 }, { x: 0.5, y: 0.82 }, { x: 0.82, y: 0.82 },
-      ];
-      for (const region of regions) {
-        const cw = Math.floor(vw * 0.28);
-        const ch = Math.floor(vh * 0.28);
-        const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * region.x - cw / 2)));
-        const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * region.y - ch / 2)));
-
-        const up = document.createElement("canvas");
-        up.width = 1000;
-        up.height = 1000;
-        const upCtx = up.getContext("2d", { willReadFrequently: true });
-        if (!upCtx) continue;
-        upCtx.imageSmoothingEnabled = false;
-        upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
-        hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height));
-        if (hit) break;
-      }
+    // Phase 1: crop tengah (umumnya mini QR ada di sini)
+    if (!hit && fallbackPhase === 1) {
+      const scale = 0.38;
+      const cw = Math.floor(vw * scale);
+      const ch = Math.floor(vh * scale);
+      const sx = Math.floor((vw - cw) / 2);
+      const sy = Math.floor((vh - ch) / 2);
+      upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
+      hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height), "fast");
     }
+
+    // Phase 2: 1 region grid per tick (bukan semua sekaligus, biar tidak lag)
+    if (!hit && fallbackPhase === 2) {
+      const region = FALLBACK_GRID[fallbackRegionCursor % FALLBACK_GRID.length];
+      fallbackRegionCursor += 1;
+      const cw = Math.floor(vw * 0.28);
+      const ch = Math.floor(vh * 0.28);
+      const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * region.x - cw / 2)));
+      const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * region.y - ch / 2)));
+      upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
+      hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height), "fast");
+    }
+
+    fallbackPhase = (fallbackPhase + 1) % 3;
 
     if (hit?.data) {
       handleScanSuccess(hit.data, { source: "jsqr-fallback" });
@@ -355,7 +370,7 @@ function detectMiniQrFromVideoFrame() {
 function startFallbackLoop() {
   stopFallbackLoop();
   if (typeof jsQR === "undefined") return;
-  fallbackIntervalId = setInterval(detectMiniQrFromVideoFrame, 420);
+  fallbackIntervalId = setInterval(detectMiniQrFromVideoFrame, FALLBACK_INTERVAL_MS);
 }
 
 function stopFallbackLoop() {
@@ -425,6 +440,8 @@ async function startScanner() {
     );
 
     scanStartedAt = Date.now();
+    fallbackPhase = 0;
+    fallbackRegionCursor = 0;
     showMiniQrGuideIntro();
     showStatus("Scanner aktif. Arahkan kamera ke QR code.", "secondary");
     await applyCameraEnhancements();
@@ -478,7 +495,7 @@ async function copyPayload() {
   if (!scannedResult) return;
   try {
     await navigator.clipboard.writeText(scannedResult);
-    showStatus("Ì≥ã Isi QR berhasil disalin.", "info");
+    showStatus("Isi QR berhasil disalin.", "info");
   } catch {
     showStatus("‚ö†Ô∏è Tidak bisa menyalin otomatis. Silakan salin manual dari hasil scan.", "warning");
   }
