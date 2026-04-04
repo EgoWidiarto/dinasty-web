@@ -1,5 +1,5 @@
 // Service Worker
-const CACHE_NAME = "dinamika-v14";
+const CACHE_NAME = "dinamika-v15";
 const urlsToCache = [
   "/",
   "/index.html",
@@ -9,6 +9,8 @@ const urlsToCache = [
   "/js/app.js",
   "/js/chatbot.js",
   "/js/scanner.js?v=20260404-8",
+  "/js/scanner-nimiq.js",
+  "/js/scanner-mini-runtime-global.js",
   "/vendor/qr-scanner.umd.min.js?v=20260404-3",
   "/vendor/qr-scanner-worker.min.js",
   "/manifest.json",
@@ -18,9 +20,18 @@ const urlsToCache = [
 self.addEventListener("install", (event) => {
   self.skipWaiting(); // Aktifkan service worker baru langsung
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
+    caches.open(CACHE_NAME).then(async (cache) => {
       console.log("✅ Cache opened");
-      return cache.addAll(urlsToCache);
+
+      await Promise.allSettled(
+        urlsToCache.map(async (url) => {
+          try {
+            await cache.add(url);
+          } catch (error) {
+            console.warn("⚠️ Gagal pre-cache:", url, error);
+          }
+        }),
+      );
     }),
   );
 });
