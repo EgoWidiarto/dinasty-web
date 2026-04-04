@@ -1,1129 +1,35 @@
-// QR Scanner Script
-let html5QrcodeScanner;
+// Scanner QR baru (clean rewrite) fokus mini QR
+let html5Qr = null;
 let scannedResult = null;
-let autoZoomIntervalId = null;
-let scannerUiBootstrapTimer = null;
-let scannerUiBootstrapAttempts = 0;
-let hasAutoStartedScanner = false;
+let fallbackIntervalId = null;
+let fallbackBusy = false;
 let currentZoomLevel = 1;
-let lastTouchDistance = 0;
-let alternativeQrReader = null;
-let alternativeQrScanner = null;
-let usingAlternativeScanner = false;
-let alternativeScannerStarted = false;
-let realtimeFallbackIntervalId = null;
-let fallbackFrameBusy = false;
-let autoCameraCycleIntervalId = null;
-let autoCameraCycleStartTimeoutId = null;
-let autoCameraSwitchInProgress = false;
-let scanSessionStartedAt = 0;
-let lastGuideUpdateAt = 0;
-const MAX_SAFE_ZOOM_FRACTION = 0.35;
-const CARD_SCAN_QRBLOCK_MOBILE = { width: 170, height: 170 };
-const CARD_SCAN_QRBLOCK_DESKTOP = { width: 220, height: 220 };
+let scanStartedAt = 0;
 
-function scoreCameraOption(opt, isMobile) {
-  const label = (opt.textContent || "").toLowerCase();
-  const value = (opt.value || "").toLowerCase();
-  let score = 0;
-
-  // Prioritas utama: kamera belakang / environment
-  if (/back|rear|environment|belakang|world|main camera/.test(label)) score += 120;
-  if (/main|primary|default|wide/.test(label)) score += 30;
-  if (/front|selfie|user|depan/.test(label)) score -= 90;
-
-  // Prioritas kualitas kamera
-  if (/4k|2160|uhd/.test(label)) score += 25;
-  if (/1080|full hd|fhd/.test(label)) score += 20;
-  if (/720|hd/.test(label)) score += 10;
-  if (/wide|ultra wide|tele|macro/.test(label)) score += 8;
-  if (/48mp|64mp|108mp|12mp|13mp|main|primary|rear camera 0|camera 0/.test(label)) score += 18;
-
-  // Hindari virtual camera di desktop
-  if (/virtual|obs|droidcam|epoccam/.test(label)) score -= 80;
-
-  // Hindari kamera selfie / secondary lens yang sering lebih buruk kualitasnya
-  if (/ultra wide/.test(label)) score -= 5;
-  if (/tele|macro/.test(label)) score -= 5;
-
-  // Kalau browser menampilkan index device, kamera pertama biasanya kamera utama di banyak perangkat
-  if (/camera 0|device 0|id 0|0$/.test(value)) score += 12;
-  if (/camera 1|device 1|id 1|1$/.test(value)) score -= 3;
-
-  // Mobile: dorong kamera belakang lebih agresif
-  if (isMobile && /back|rear|environment|belakang|world/.test(label)) score += 40;
-  if (isMobile && /main|primary|default/.test(label)) score += 15;
-
-  return score;
-}
-
-function getRankedCameraOptions(options, isMobile) {
-  const validOptions = options.filter((opt) => {
-    const value = (opt.value || "").trim();
-    const label = (opt.textContent || "").toLowerCase();
-    if (!value) return false;
-    if (/select|pilih|choose/.test(label)) return false;
-    return true;
-  });
-
-  if (validOptions.length === 0) return [];
-
-  const scored = validOptions.map((opt) => ({
-    opt,
-    score: scoreCameraOption(opt, isMobile),
-  }));
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored.map((item) => item.opt);
-}
+const MINI_QR_CONFIG = {
+  mobile: { fps: 14, qrbox: { width: 170, height: 170 }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1440, min: 720 } },
+  desktop: { fps: 20, qrbox: { width: 220, height: 220 }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 } },
+};
 
 function isMobileDevice() {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
-function pickOptimalCameraOption(options, isMobile) {
-  const ranked = getRankedCameraOptions(options, isMobile);
-  return ranked[0] || null;
+function showStatus(message, type = "info") {
+  const statusMsg = document.getElementById("statusMessage");
+  if (statusMsg) statusMsg.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
 }
 
-function getInnerHtml5QrcodeInstance() {
-  if (usingAlternativeScanner) return null;
-  if (!html5QrcodeScanner) return null;
-  return html5QrcodeScanner.html5Qrcode || html5QrcodeScanner.html5Qrcode_ || null;
-}
-
-function isScannerRunning() {
-  if (usingAlternativeScanner) {
-    return alternativeScannerStarted;
-  }
-
-  if (!html5QrcodeScanner || typeof html5QrcodeScanner.getState !== "function") return false;
-
-  try {
-    return html5QrcodeScanner.getState() === Html5QrcodeScannerState.SCANNING;
-  } catch {
-    return false;
-  }
-}
-
-function getActiveVideoElement() {
-  const readerEl = document.getElementById("reader");
-  if (!readerEl) return null;
-
-  if (usingAlternativeScanner) {
-    const altVideo = document.getElementById("altQrVideo");
-    if (altVideo) return altVideo;
-  }
-
-  return readerEl.querySelector("video");
-}
-
-function setScanGuideMessage(message, tone = "warning") {
+function setGuide(message, tone = "warning") {
   const guideEl = document.getElementById("scanGuide");
   if (!guideEl) return;
-
   const toneClass = tone === "danger" ? "text-danger" : tone === "success" ? "text-success" : "text-warning";
   guideEl.className = `mt-2 small text-center ${toneClass}`;
   guideEl.textContent = message || "";
 }
 
 function showMiniQrGuideIntro() {
-  setScanGuideMessage("Mode QR kecil aktif: jaga kontras tinggi (hitam-putih), sisakan pinggir putih (quiet zone), dan coba jarak dekat-lalu-jauh perlahan.", "warning");
-}
-
-function estimateFrameQuality(imageData) {
-  const src = imageData?.data;
-  if (!src || src.length < 4) {
-    return {
-      brightness: 128,
-      contrast: 0,
-      sharpness: 0,
-    };
-  }
-
-  let sum = 0;
-  let sumSq = 0;
-  let edgeEnergy = 0;
-  let count = 0;
-
-  const w = imageData.width;
-  const h = imageData.height;
-  const gray = new Uint8Array(w * h);
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = (y * w + x) * 4;
-      const g = Math.round(0.299 * src[idx] + 0.587 * src[idx + 1] + 0.114 * src[idx + 2]);
-      gray[y * w + x] = g;
-      sum += g;
-      sumSq += g * g;
-      count += 1;
-    }
-  }
-
-  const mean = count ? sum / count : 128;
-  const variance = count ? Math.max(0, sumSq / count - mean * mean) : 0;
-  const contrast = Math.sqrt(variance);
-
-  for (let y = 0; y < h - 1; y++) {
-    for (let x = 0; x < w - 1; x++) {
-      const i = y * w + x;
-      edgeEnergy += Math.abs(gray[i] - gray[i + 1]);
-      edgeEnergy += Math.abs(gray[i] - gray[i + w]);
-    }
-  }
-
-  const sharpness = edgeEnergy / Math.max(1, (w - 1) * (h - 1) * 2);
-
-  return {
-    brightness: mean,
-    contrast,
-    sharpness,
-  };
-}
-
-function updateMiniQrGuideFromFrame(srcCanvas, vw, vh) {
-  const now = Date.now();
-  if (now - lastGuideUpdateAt < 1200) return;
-  lastGuideUpdateAt = now;
-
-  const analysisCanvas = document.createElement("canvas");
-  analysisCanvas.width = 160;
-  analysisCanvas.height = 160;
-  const actx = analysisCanvas.getContext("2d", { willReadFrequently: true });
-  if (!actx) return;
-
-  // Fokus analisa di area tengah tempat user biasanya menaruh QR.
-  const aw = Math.floor(vw * 0.55);
-  const ah = Math.floor(vh * 0.55);
-  const sx = Math.floor((vw - aw) / 2);
-  const sy = Math.floor((vh - ah) / 2);
-  actx.drawImage(srcCanvas, sx, sy, aw, ah, 0, 0, analysisCanvas.width, analysisCanvas.height);
-
-  const frame = actx.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
-  const q = estimateFrameQuality(frame);
-  const elapsed = scanSessionStartedAt ? Math.floor((now - scanSessionStartedAt) / 1000) : 0;
-
-  if (q.brightness < 65) {
-    setScanGuideMessage("Terlalu gelap. Tambah cahaya langsung ke kartu agar modul QR kecil lebih terbaca.", "warning");
-    return;
-  }
-
-  if (q.brightness > 205) {
-    setScanGuideMessage("Terlalu terang / silau. Miringkan kartu sedikit untuk menghindari pantulan.", "warning");
-    return;
-  }
-
-  if (q.contrast < 22) {
-    setScanGuideMessage("Kontras rendah. Pastikan QR hitam-putih jelas dan tidak tertutup glare/refleksi.", "warning");
-    return;
-  }
-
-  if (q.sharpness < 14) {
-    setScanGuideMessage("Masih blur. Tahan tangan 1 detik, lalu ubah jarak 2-3 cm (dekat lalu sedikit menjauh).", "warning");
-    return;
-  }
-
-  if (elapsed > 10) {
-    setScanGuideMessage("Belum terbaca: pastikan ada pinggir putih (quiet zone) di sekitar QR dan isi sekitar 35-45% area frame.", "warning");
-    return;
-  }
-
-  setScanGuideMessage("Kualitas frame sudah cukup. Coba kunci posisi kartu di tengah selama 1-2 detik.", "success");
-}
-
-function setZoomControlsEnabled(enabled) {
-  const zoomInBtn = document.getElementById("zoomInBtn");
-  const zoomOutBtn = document.getElementById("zoomOutBtn");
-  const zoomSlider = document.getElementById("zoomSlider");
-
-  if (zoomInBtn) zoomInBtn.disabled = !enabled;
-  if (zoomOutBtn) zoomOutBtn.disabled = !enabled;
-  if (zoomSlider) zoomSlider.disabled = !enabled;
-}
-
-async function stopAlternativeScanner() {
-  if (!alternativeQrScanner && !alternativeQrReader) {
-    alternativeScannerStarted = false;
-    usingAlternativeScanner = false;
-    return;
-  }
-
-  try {
-    if (alternativeQrScanner && typeof alternativeQrScanner.stop === "function") {
-      await alternativeQrScanner.stop();
-    }
-  } catch {
-    // ignore
-  }
-
-  try {
-    if (alternativeQrReader && typeof alternativeQrReader.reset === "function") {
-      alternativeQrReader.reset();
-    }
-  } catch {
-    // ignore
-  }
-
-  const readerEl = document.getElementById("reader");
-  if (readerEl) {
-    readerEl.innerHTML = "";
-  }
-
-  alternativeQrReader = null;
-  alternativeQrScanner = null;
-  alternativeScannerStarted = false;
-  usingAlternativeScanner = false;
-}
-
-function setupAlternativeCameraEnhancements(videoEl) {
-  if (!videoEl || !videoEl.srcObject) return;
-  const stream = videoEl.srcObject;
-  const track = stream.getVideoTracks && stream.getVideoTracks()[0];
-  if (!track || typeof track.getCapabilities !== "function" || typeof track.applyConstraints !== "function") return;
-
-  try {
-    const caps = track.getCapabilities();
-    const advanced = [];
-
-    if (Array.isArray(caps?.focusMode)) {
-      if (caps.focusMode.includes("continuous")) advanced.push({ focusMode: "continuous" });
-      else if (caps.focusMode.includes("single-shot")) advanced.push({ focusMode: "single-shot" });
-    }
-
-    if (caps?.focusDistance && Number.isFinite(caps.focusDistance.min)) {
-      advanced.push({ focusDistance: caps.focusDistance.min });
-    }
-
-    if (advanced.length > 0) {
-      track.applyConstraints({ advanced }).catch(() => {});
-    }
-  } catch {
-    // ignore
-  }
-}
-
-async function initializeAlternativeScanner() {
-  if (typeof ZXingBrowser === "undefined") return false;
-
-  const readerEl = document.getElementById("reader");
-  if (!readerEl) return false;
-
-  stopRealtimeJsQrFallback();
-  stopAutoCameraCycleFallback();
-
-  try {
-    if (html5QrcodeScanner && typeof html5QrcodeScanner.clear === "function") {
-      html5QrcodeScanner.clear().catch(() => {});
-    }
-  } catch {
-    // ignore
-  }
-
-  readerEl.innerHTML = "";
-  readerEl.style.background = "#000";
-  readerEl.style.aspectRatio = "3 / 4";
-
-  const altVideo = document.createElement("video");
-  altVideo.id = "altQrVideo";
-  altVideo.setAttribute("playsinline", "true");
-  altVideo.autoplay = true;
-  altVideo.muted = true;
-  altVideo.style.width = "100%";
-  altVideo.style.height = "100%";
-  altVideo.style.objectFit = "cover";
-  readerEl.appendChild(altVideo);
-
-  alternativeQrReader = new ZXingBrowser.BrowserQRCodeReader();
-
-  try {
-    alternativeQrScanner = await alternativeQrReader.decodeFromConstraints(
-      {
-        audio: false,
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 2560 },
-          height: { ideal: 1920 },
-          aspectRatio: { ideal: 0.75 },
-        },
-      },
-      altVideo,
-      (result, err) => {
-        if (result) {
-          onScanSuccess(result.getText(), { source: "zxing-alt" });
-        }
-      },
-    );
-    usingAlternativeScanner = true;
-    alternativeScannerStarted = true;
-    scanSessionStartedAt = Date.now();
-    showMiniQrGuideIntro();
-    setZoomControlsEnabled(false);
-    setupAlternativeCameraEnhancements(altVideo);
-    startRealtimeJsQrFallback();
-    return true;
-  } catch (err) {
-    console.error("Alternative scanner gagal dijalankan:", err);
-    await stopAlternativeScanner();
-    return false;
-  }
-}
-
-function runWhenScannerReady(action, timeoutMs = 5000) {
-  const startedAt = Date.now();
-
-  const attempt = () => {
-    if (scannedResult) return;
-
-    if (isScannerRunning()) {
-      action();
-      return;
-    }
-
-    if (Date.now() - startedAt >= timeoutMs) return;
-    setTimeout(attempt, 250);
-  };
-
-  attempt();
-}
-
-function getSafeMaxZoom(capabilities) {
-  const min = Number.isFinite(capabilities?.zoom?.min) ? capabilities.zoom.min : 1;
-  const max = Number.isFinite(capabilities?.zoom?.max) ? capabilities.zoom.max : min;
-  if (max <= min) return min;
-
-  const safeMax = min + (max - min) * MAX_SAFE_ZOOM_FRACTION;
-  return Math.max(min, Math.min(max, safeMax));
-}
-
-async function applyFocusEnhancements() {
-  if (!isScannerRunning()) return false;
-
-  const inner = getInnerHtml5QrcodeInstance();
-  if (!inner || typeof inner.applyVideoConstraints !== "function" || typeof inner.getRunningTrackCapabilities !== "function") {
-    return false;
-  }
-
-  try {
-    const capabilities = inner.getRunningTrackCapabilities();
-    const advanced = [];
-
-    if (Array.isArray(capabilities?.focusMode)) {
-      if (capabilities.focusMode.includes("continuous")) {
-        advanced.push({ focusMode: "continuous" });
-      } else if (capabilities.focusMode.includes("single-shot")) {
-        advanced.push({ focusMode: "single-shot" });
-      }
-    }
-
-    if (Array.isArray(capabilities?.exposureMode) && capabilities.exposureMode.includes("continuous")) {
-      advanced.push({ exposureMode: "continuous" });
-    }
-
-    if (Array.isArray(capabilities?.whiteBalanceMode) && capabilities.whiteBalanceMode.includes("continuous")) {
-      advanced.push({ whiteBalanceMode: "continuous" });
-    }
-
-    // Untuk QR yang didekatkan ke kamera: dorong fokus ke jarak dekat jika didukung.
-    if (capabilities?.focusDistance && Number.isFinite(capabilities.focusDistance.min)) {
-      advanced.push({ focusDistance: capabilities.focusDistance.min });
-    }
-
-    if (advanced.length === 0) return false;
-
-    await inner.applyVideoConstraints({ advanced });
-    return true;
-  } catch (err) {
-    console.warn("Fitur autofocus tidak didukung kamera/browser:", err);
-    return false;
-  }
-}
-
-function scheduleFocusEnhancement() {
-  // Beri waktu agar stream kamera sudah aktif sebelum set constraint fokus.
-  runWhenScannerReady(() => {
-    setTimeout(() => {
-      applyFocusEnhancements();
-    }, 300);
-  });
-}
-
-function getScannerQrBox(isMobile) {
-  return isMobile ? CARD_SCAN_QRBLOCK_MOBILE : CARD_SCAN_QRBLOCK_DESKTOP;
-}
-
-async function applyZoomLevel(level) {
-  if (!isScannerRunning()) return false;
-
-  const inner = getInnerHtml5QrcodeInstance();
-  if (!inner || typeof inner.getRunningTrackCapabilities !== "function" || typeof inner.applyVideoConstraints !== "function") {
-    return false;
-  }
-
-  try {
-    const capabilities = inner.getRunningTrackCapabilities();
-    if (!capabilities?.zoom) return false;
-
-    const min = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
-    const max = getSafeMaxZoom(capabilities);
-    if (max <= min) return false;
-
-    const targetZoom = Math.max(min, Math.min(max, min + (max - min) * level));
-    currentZoomLevel = targetZoom;
-    await inner.applyVideoConstraints({ advanced: [{ zoom: targetZoom }] });
-    updateZoomDisplay();
-    scheduleFocusEnhancement();
-    return true;
-  } catch (err) {
-    console.warn("Zoom constraint tidak didukung kamera/browser:", err);
-    return false;
-  }
-}
-
-async function increaseZoom() {
-  if (!isScannerRunning()) return;
-
-  const inner = getInnerHtml5QrcodeInstance();
-  if (!inner || typeof inner.getRunningTrackCapabilities !== "function") return;
-
-  try {
-    const capabilities = inner.getRunningTrackCapabilities();
-    if (!capabilities?.zoom) return;
-
-    const min = capabilities.zoom.min || 1;
-    const max = getSafeMaxZoom(capabilities);
-    const step = (max - min) * 0.08; // langkah kecil agar fokus tetap stabil
-
-    const newZoom = Math.min(max, currentZoomLevel + step);
-    await inner.applyVideoConstraints({ advanced: [{ zoom: newZoom }] });
-    currentZoomLevel = newZoom;
-    updateZoomDisplay();
-    scheduleFocusEnhancement();
-  } catch (err) {
-    console.warn("Zoom increase failed:", err);
-  }
-}
-
-async function decreaseZoom() {
-  if (!isScannerRunning()) return;
-
-  const inner = getInnerHtml5QrcodeInstance();
-  if (!inner || typeof inner.getRunningTrackCapabilities !== "function") return;
-
-  try {
-    const capabilities = inner.getRunningTrackCapabilities();
-    if (!capabilities?.zoom) return;
-
-    const min = capabilities.zoom.min || 1;
-    const max = getSafeMaxZoom(capabilities);
-    const step = (max - min) * 0.08; // langkah kecil agar fokus tetap stabil
-
-    const newZoom = Math.max(min, currentZoomLevel - step);
-    await inner.applyVideoConstraints({ advanced: [{ zoom: newZoom }] });
-    currentZoomLevel = newZoom;
-    updateZoomDisplay();
-    scheduleFocusEnhancement();
-  } catch (err) {
-    console.warn("Zoom decrease failed:", err);
-  }
-}
-
-function updateZoomDisplay() {
-  const zoomDisplay = document.getElementById("zoomLevelDisplay");
-  if (zoomDisplay) {
-    zoomDisplay.textContent = `${Math.round(currentZoomLevel * 100)}%`;
-  }
-}
-
-function setupPinchToZoom() {
-  const readerEl = document.getElementById("reader");
-  if (!readerEl) return;
-
-  let lastTouchDistance = 0;
-
-  readerEl.addEventListener(
-    "touchmove",
-    (e) => {
-      if (e.touches.length === 2) {
-        e.preventDefault(); // Prevent default pinch behavior
-
-        const touch1 = e.touches[0];
-        const touch2 = e.touches[1];
-        const distance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
-
-        if (lastTouchDistance > 0) {
-          const delta = distance - lastTouchDistance;
-          if (delta > 5) {
-            increaseZoom(); // Pinch out = zoom in
-          } else if (delta < -5) {
-            decreaseZoom(); // Pinch in = zoom out
-          }
-        }
-
-        lastTouchDistance = distance;
-      }
-    },
-    { passive: false },
-  );
-
-  readerEl.addEventListener("touchend", () => {
-    lastTouchDistance = 0;
-  });
-}
-
-function startAdaptiveAutoZoom() {
-  // Auto zoom dinonaktifkan sesuai permintaan.
-  stopAdaptiveAutoZoom();
-}
-
-function stabilizeScannerForCard() {
-  // Coba refocus beberapa kali awal agar kamera lebih cepat lock ke QR kecil di kartu.
-  runWhenScannerReady(() => {
-    scheduleFocusEnhancement();
-    setTimeout(() => {
-      scheduleFocusEnhancement();
-    }, 1200);
-  });
-}
-
-function toGrayscaleImageData(imageData, contrast = 1.0) {
-  const out = new ImageData(imageData.width, imageData.height);
-  const src = imageData.data;
-  const dst = out.data;
-
-  for (let i = 0; i < src.length; i += 4) {
-    const gray = 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
-    const adjusted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
-    dst[i] = adjusted;
-    dst[i + 1] = adjusted;
-    dst[i + 2] = adjusted;
-    dst[i + 3] = 255;
-  }
-
-  return out;
-}
-
-function toBinaryImageData(imageData, threshold) {
-  const out = new ImageData(imageData.width, imageData.height);
-  const src = imageData.data;
-  const dst = out.data;
-
-  for (let i = 0; i < src.length; i += 4) {
-    const gray = src[i];
-    const bin = gray > threshold ? 255 : 0;
-    dst[i] = bin;
-    dst[i + 1] = bin;
-    dst[i + 2] = bin;
-    dst[i + 3] = 255;
-  }
-
-  return out;
-}
-
-function estimateGrayMean(imageData) {
-  const src = imageData?.data;
-  if (!src || src.length === 0) return 128;
-
-  let sum = 0;
-  let count = 0;
-  for (let i = 0; i < src.length; i += 4) {
-    sum += src[i];
-    count += 1;
-  }
-  if (count === 0) return 128;
-  return Math.max(0, Math.min(255, Math.round(sum / count)));
-}
-
-function sharpenImageData(imageData, amount = 0.85) {
-  const w = imageData.width;
-  const h = imageData.height;
-  const src = imageData.data;
-  const out = new ImageData(w, h);
-  const dst = out.data;
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      const c = src[i];
-      const l = src[(y * w + Math.max(0, x - 1)) * 4];
-      const r = src[(y * w + Math.min(w - 1, x + 1)) * 4];
-      const t = src[(Math.max(0, y - 1) * w + x) * 4];
-      const b = src[(Math.min(h - 1, y + 1) * w + x) * 4];
-
-      const edge = c * 5 - l - r - t - b;
-      const val = Math.max(0, Math.min(255, Math.round(c * (1 - amount) + edge * amount)));
-
-      dst[i] = val;
-      dst[i + 1] = val;
-      dst[i + 2] = val;
-      dst[i + 3] = 255;
-    }
-  }
-
-  return out;
-}
-
-function decodeQrFromImageData(imageData) {
-  if (typeof jsQR === "undefined" || !imageData) return null;
-
-  try {
-    const raw = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: "attemptBoth",
-    });
-    if (raw) return raw;
-
-    const gray = toGrayscaleImageData(imageData, 1.35);
-    const grayDecoded = jsQR(gray.data, gray.width, gray.height, {
-      inversionAttempts: "attemptBoth",
-    });
-    if (grayDecoded) return grayDecoded;
-
-    const sharpened = sharpenImageData(gray, 0.9);
-    const sharpDecoded = jsQR(sharpened.data, sharpened.width, sharpened.height, {
-      inversionAttempts: "attemptBoth",
-    });
-    if (sharpDecoded) return sharpDecoded;
-
-    const mean = estimateGrayMean(gray);
-    const thresholds = [70, 90, 110, 130, 150, 170, mean - 25, mean, mean + 25].map((v) => Math.max(35, Math.min(220, Math.round(v)))).filter((v, idx, arr) => arr.indexOf(v) === idx);
-
-    for (const t of thresholds) {
-      const bw = toBinaryImageData(gray, t);
-      const bwDecoded = jsQR(bw.data, bw.width, bw.height, {
-        inversionAttempts: "attemptBoth",
-      });
-      if (bwDecoded) return bwDecoded;
-
-      const bwSharp = toBinaryImageData(sharpened, t);
-      const bwSharpDecoded = jsQR(bwSharp.data, bwSharp.width, bwSharp.height, {
-        inversionAttempts: "attemptBoth",
-      });
-      if (bwSharpDecoded) return bwSharpDecoded;
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function stopRealtimeJsQrFallback() {
-  if (realtimeFallbackIntervalId) {
-    clearInterval(realtimeFallbackIntervalId);
-    realtimeFallbackIntervalId = null;
-  }
-}
-
-function stopAutoCameraCycleFallback() {
-  if (autoCameraCycleStartTimeoutId) {
-    clearTimeout(autoCameraCycleStartTimeoutId);
-    autoCameraCycleStartTimeoutId = null;
-  }
-
-  if (autoCameraCycleIntervalId) {
-    clearInterval(autoCameraCycleIntervalId);
-    autoCameraCycleIntervalId = null;
-  }
-  autoCameraSwitchInProgress = false;
-}
-
-function switchToCameraOption(cameraSelect, nextOption) {
-  if (!cameraSelect || !nextOption) return;
-  if (cameraSelect.value !== nextOption.value) {
-    cameraSelect.value = nextOption.value;
-    cameraSelect.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-}
-
-function startAutoCameraCycleFallback() {
-  if (usingAlternativeScanner) return;
-  if (!isMobileDevice()) return;
-
-  const readerEl = document.getElementById("reader");
-  if (!readerEl) return;
-
-  const cameraSelect = readerEl.querySelector("select");
-  if (!cameraSelect || cameraSelect.options.length <= 1) return;
-
-  const rankedOptions = getRankedCameraOptions(Array.from(cameraSelect.options), true);
-  if (rankedOptions.length <= 1) return;
-
-  const prioritized = rankedOptions.filter((opt) => {
-    const label = (opt.textContent || "").toLowerCase();
-    return !/front|selfie|user|depan/.test(label);
-  });
-
-  const cameraCandidates = prioritized.length > 0 ? prioritized : rankedOptions;
-  let cursor = cameraCandidates.findIndex((opt) => opt.value === cameraSelect.value);
-  if (cursor < 0) cursor = 0;
-
-  stopAutoCameraCycleFallback();
-  autoCameraCycleStartTimeoutId = setTimeout(() => {
-    if (scannedResult) return;
-
-    autoCameraCycleIntervalId = setInterval(() => {
-      if (scannedResult) {
-        stopAutoCameraCycleFallback();
-        return;
-      }
-
-      if (autoCameraSwitchInProgress) return;
-
-      cursor = (cursor + 1) % cameraCandidates.length;
-      const nextOption = cameraCandidates[cursor];
-      if (!nextOption || nextOption.value === cameraSelect.value) return;
-
-      autoCameraSwitchInProgress = true;
-      const stopBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /stop|hentikan/i.test(btn.textContent || ""));
-      const startBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
-
-      if (stopBtn && !stopBtn.disabled) {
-        stopBtn.click();
-      }
-
-      setTimeout(() => {
-        switchToCameraOption(cameraSelect, nextOption);
-
-        setTimeout(() => {
-          const liveStartBtn = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
-          if (liveStartBtn && !liveStartBtn.disabled) {
-            liveStartBtn.click();
-            scheduleFocusEnhancement();
-            stabilizeScannerForCard();
-            startRealtimeJsQrFallback();
-          } else if (startBtn && !startBtn.disabled) {
-            startBtn.click();
-            scheduleFocusEnhancement();
-            stabilizeScannerForCard();
-            startRealtimeJsQrFallback();
-          }
-
-          autoCameraSwitchInProgress = false;
-        }, 260);
-      }, 240);
-    }, 10000);
-  }, 14000);
-}
-
-function tryRealtimeJsQrFallbackOnce() {
-  if (fallbackFrameBusy || scannedResult || !isScannerRunning()) return;
-  fallbackFrameBusy = true;
-
-  try {
-    const videoEl = getActiveVideoElement();
-    if (!videoEl || videoEl.readyState < 2) return;
-
-    const vw = videoEl.videoWidth || 0;
-    const vh = videoEl.videoHeight || 0;
-    if (!vw || !vh) return;
-
-    const srcCanvas = document.createElement("canvas");
-    srcCanvas.width = vw;
-    srcCanvas.height = vh;
-    const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
-    if (!srcCtx) return;
-
-    srcCtx.drawImage(videoEl, 0, 0, vw, vh);
-    updateMiniQrGuideFromFrame(srcCanvas, vw, vh);
-
-    // 1) Coba full-frame dulu.
-    let code = decodeQrFromImageData(srcCtx.getImageData(0, 0, vw, vh));
-
-    // 2) Kalau belum dapat, coba beberapa crop tengah dan upscale lebih tinggi.
-    if (!code) {
-      const cropScales = [0.78, 0.65, 0.52, 0.42, 0.34, 0.28, 0.22, 0.18];
-      for (const scale of cropScales) {
-        const cw = Math.floor(vw * scale);
-        const ch = Math.floor(vh * scale);
-        const sx = Math.floor((vw - cw) / 2);
-        const sy = Math.floor((vh - ch) / 2);
-
-        const upscaleCanvas = document.createElement("canvas");
-        upscaleCanvas.width = 1200;
-        upscaleCanvas.height = 1200;
-        const upscaleCtx = upscaleCanvas.getContext("2d", { willReadFrequently: true });
-        if (!upscaleCtx) continue;
-
-        upscaleCtx.imageSmoothingEnabled = false;
-        upscaleCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, upscaleCanvas.width, upscaleCanvas.height);
-
-        code = decodeQrFromImageData(upscaleCtx.getImageData(0, 0, upscaleCanvas.width, upscaleCanvas.height));
-        if (code) break;
-      }
-    }
-
-    // 3) Kalau masih gagal, coba beberapa titik crop (untuk QR kecil yang tidak tepat di tengah frame).
-    if (!code) {
-      const regions = [
-        { x: 0.18, y: 0.18 },
-        { x: 0.5, y: 0.18 },
-        { x: 0.82, y: 0.18 },
-        { x: 0.18, y: 0.5 },
-        { x: 0.5, y: 0.5 },
-        { x: 0.82, y: 0.5 },
-        { x: 0.18, y: 0.82 },
-        { x: 0.5, y: 0.82 },
-        { x: 0.82, y: 0.82 },
-      ];
-
-      for (const region of regions) {
-        const cw = Math.floor(vw * 0.3);
-        const ch = Math.floor(vh * 0.3);
-        const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * region.x - cw / 2)));
-        const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * region.y - ch / 2)));
-
-        const roiCanvas = document.createElement("canvas");
-        roiCanvas.width = 1000;
-        roiCanvas.height = 1000;
-        const roiCtx = roiCanvas.getContext("2d", { willReadFrequently: true });
-        if (!roiCtx) continue;
-
-        roiCtx.imageSmoothingEnabled = false;
-        roiCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, roiCanvas.width, roiCanvas.height);
-
-        code = decodeQrFromImageData(roiCtx.getImageData(0, 0, roiCanvas.width, roiCanvas.height));
-        if (code) break;
-      }
-    }
-
-    if (code && code.data) {
-      console.log("✅ QR Code terdeteksi via fallback jsQR:", code.data);
-      onScanSuccess(code.data, { source: "jsqr-fallback" });
-    }
-  } finally {
-    fallbackFrameBusy = false;
-  }
-}
-
-function startRealtimeJsQrFallback() {
-  if (typeof jsQR === "undefined") return;
-  stopRealtimeJsQrFallback();
-  if (!scanSessionStartedAt) {
-    scanSessionStartedAt = Date.now();
-  }
-
-  // Beri delay kecil sampai video kamera benar-benar siap.
-  setTimeout(() => {
-    if (scannedResult || !isScannerRunning()) return;
-    realtimeFallbackIntervalId = setInterval(() => {
-      tryRealtimeJsQrFallbackOnce();
-    }, 450);
-  }, 1000);
-}
-
-function stopAdaptiveAutoZoom() {
-  if (autoZoomIntervalId) {
-    clearInterval(autoZoomIntervalId);
-    autoZoomIntervalId = null;
-  }
-}
-
-function translateScannerTextToIndonesian(text) {
-  const normalized = (text || "").trim();
-  if (!normalized) return null;
-
-  const translationRules = [
-    [/^start scanning$/i, "Mulai Scan"],
-    [/^stop scanning$/i, "Hentikan Pemindaian"],
-    [/^scan an image file$/i, "Unggah Gambar QR"],
-    [/^scan using camera directly$/i, "Pindai Langsung dengan Kamera"],
-    [/^camera based scan$/i, "Mode Kamera"],
-    [/^file based scan$/i, "Mode File"],
-    [/^select camera\s*\((\d+)\)$/i, "Pilih Kamera ($1)"],
-    [/^select camera$/i, "Pilih Kamera"],
-    [/^requesting camera permissions$/i, "Meminta Izin Kamera"],
-    [/^no cameras found$/i, "Kamera Tidak Ditemukan"],
-    [/^camera permission denied$/i, "Izin Kamera Ditolak"],
-    [/^camera access is blocked$/i, "Akses Kamera Diblokir"],
-    [/^launch camera$/i, "Meluncurkan Kamera"],
-    [/^torch on$/i, "Nyalakan Senter"],
-    [/^torch off$/i, "Matikan Senter"],
-    [/^torch$/i, "Senter"],
-  ];
-
-  for (const [regex, replacement] of translationRules) {
-    if (regex.test(normalized)) {
-      return normalized.replace(regex, replacement);
-    }
-  }
-
-  return null;
-}
-
-function localizeAndPolishScannerUi() {
-  const readerEl = document.getElementById("reader");
-  if (!readerEl) return;
-
-  const applyUi = () => {
-    const swapLink = readerEl.querySelector("#reader__dashboard_section_swaplink");
-    if (swapLink) {
-      swapLink.style.display = "none";
-    }
-
-    const fileScanSection = readerEl.querySelector("#reader__dashboard_section_fsr");
-    if (fileScanSection) {
-      fileScanSection.style.display = "none";
-    }
-
-    // Hilangkan teks "Select Camera (x)" tanpa menghapus tombol Start
-    const cameraSection = readerEl.querySelector("#reader__dashboard_section_csr");
-    if (cameraSection) {
-      const walker = document.createTreeWalker(cameraSection, NodeFilter.SHOW_TEXT);
-      const textNodes = [];
-      while (walker.nextNode()) {
-        textNodes.push(walker.currentNode);
-      }
-
-      textNodes.forEach((node) => {
-        const txt = (node.nodeValue || "").trim();
-        if (/^select camera\s*\(\d+\)$/i.test(txt) || /^select camera$/i.test(txt) || /^pilih kamera\s*\(\d+\)$/i.test(txt) || /^pilih kamera$/i.test(txt)) {
-          node.nodeValue = "";
-        }
-      });
-
-      const labelCandidates = Array.from(cameraSection.querySelectorAll("label, span, p"));
-      labelCandidates.forEach((el) => {
-        if (el.children.length > 0) return;
-        const txt = (el.textContent || "").trim();
-        if (/^select camera\s*\(\d+\)$/i.test(txt) || /^select camera$/i.test(txt) || /^pilih kamera\s*\(\d+\)$/i.test(txt) || /^pilih kamera$/i.test(txt)) {
-          el.style.display = "none";
-        }
-      });
-    }
-
-    const allButtons = Array.from(readerEl.querySelectorAll("button"));
-    allButtons.forEach((btn) => {
-      const label = (btn.textContent || "").trim().toLowerCase();
-
-      if (/request camera permissions|minta izin kamera|izinkan kamera/.test(label)) {
-        btn.textContent = "Izinkan Kamera";
-        btn.classList.add("scanner-permission-btn");
-      } else if (/stop scanning|hentikan scan|hentikan pemindaian/.test(label)) {
-        btn.textContent = "Hentikan Pemindaian";
-        btn.classList.add("scanner-stop-btn");
-      } else if (/start scanning|start|mulai|scan|memindai/.test(label)) {
-        btn.textContent = "Mulai Scan";
-        btn.classList.add("scanner-start-btn");
-      } else if (/torch|senter/.test(label)) {
-        // Update torch button text
-        if (/off|matikan/i.test(label)) {
-          btn.textContent = "Matikan Senter";
-        } else {
-          btn.textContent = "Nyalakan Senter";
-        }
-        btn.classList.add("scanner-torch-btn");
-      }
-    });
-
-    // Terjemahkan semua teks bawaan html5-qrcode yang masih berbahasa Inggris
-    const translatableElements = Array.from(readerEl.querySelectorAll("button, a, span, p, label"));
-    translatableElements.forEach((el) => {
-      if (el.children.length > 0) return;
-
-      const raw = (el.textContent || "").trim();
-      const translated = translateScannerTextToIndonesian(raw);
-      if (translated && translated !== raw) {
-        el.textContent = translated;
-      }
-    });
-
-    // Sembunyikan teks bawaan "Select Camera (x)" jika masih muncul
-    const maybeCameraLabels = Array.from(readerEl.querySelectorAll("span, p, label"));
-    maybeCameraLabels.forEach((el) => {
-      if (el.children.length > 0) return;
-      const txt = (el.textContent || "").trim();
-      if (/^select camera\s*\(\d+\)$/i.test(txt) || /^select camera$/i.test(txt)) {
-        el.style.display = "none";
-      }
-    });
-  };
-
-  applyUi();
-}
-
-function autoSelectBackCameraAndStart() {
-  if (hasAutoStartedScanner) return;
-
-  const readerEl = document.getElementById("reader");
-  if (!readerEl) return;
-
-  const cameraSelect = readerEl.querySelector("select");
-  const startButton = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
-
-  if (!cameraSelect || cameraSelect.options.length === 0) {
-    return;
-  }
-
-  const options = Array.from(cameraSelect.options);
-  const targetOption = pickOptimalCameraOption(options, isMobileDevice());
-
-  if (targetOption && cameraSelect.value !== targetOption.value) {
-    cameraSelect.value = targetOption.value;
-    cameraSelect.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  // Jika belum ada kamera valid, tunggu render berikutnya
-  if (!targetOption) {
-    return;
-  }
-
-  // Beri jeda kecil agar UI internal selesai memproses event change
-  setTimeout(() => {
-    if (hasAutoStartedScanner) return;
-    const startButtonAfterSelect = Array.from(readerEl.querySelectorAll("button")).find((btn) => /start|mulai|scan/i.test(btn.textContent || ""));
-    if (startButtonAfterSelect && !startButtonAfterSelect.disabled) {
-      hasAutoStartedScanner = true;
-      startButtonAfterSelect.click();
-      scheduleFocusEnhancement();
-      startAutoCameraCycleFallback();
-      stopScannerUiBootstrap();
-    }
-  }, 120);
-}
-
-function stopScannerUiBootstrap() {
-  if (scannerUiBootstrapTimer) {
-    clearInterval(scannerUiBootstrapTimer);
-    scannerUiBootstrapTimer = null;
-  }
-}
-
-function startScannerUiBootstrap() {
-  stopScannerUiBootstrap();
-  scannerUiBootstrapAttempts = 0;
-  hasAutoStartedScanner = false;
-
-  scannerUiBootstrapTimer = setInterval(() => {
-    scannerUiBootstrapAttempts += 1;
-    localizeAndPolishScannerUi();
-    autoSelectBackCameraAndStart();
-
-    // Batasi percobaan agar tidak membebani halaman
-    if (hasAutoStartedScanner || scannerUiBootstrapAttempts >= 30) {
-      stopScannerUiBootstrap();
-    }
-  }, 350);
-}
-
-function observeScannerUiForAutoStart() {
-  const readerEl = document.getElementById("reader");
-  if (!readerEl || typeof MutationObserver === "undefined") return;
-
-  const observer = new MutationObserver(() => {
-    // Coba auto-select berulang tiap ada perubahan UI scanner
-    autoSelectBackCameraAndStart();
-    localizeAndPolishScannerUi();
-  });
-
-  observer.observe(readerEl, {
-    childList: true,
-    subtree: true,
-  });
-
-  // Auto stop observer setelah fase inisialisasi untuk mencegah overhead
-  setTimeout(() => {
-    observer.disconnect();
-  }, 12000);
+  setGuide("Mode mini QR aktif: posisikan QR di tengah, jaga kontras hitam-putih, lalu tahan 1-2 detik.", "warning");
 }
 
 function isValidHttpUrl(value) {
@@ -1137,226 +43,530 @@ function isValidHttpUrl(value) {
 
 function classifyPayload(payload) {
   if (!payload || typeof payload !== "string") {
-    return {
-      type: "Data tidak dikenal",
-      hint: "QR terbaca, tapi format data tidak standar.",
-      isUrl: false,
-    };
+    return { type: "Data tidak dikenal", hint: "QR terbaca, tetapi format datanya tidak standar.", isUrl: false };
   }
-
   if (isValidHttpUrl(payload)) {
-    return {
-      type: "URL Web",
-      hint: "Link akan otomatis dibuka dalam tab baru...",
-      isUrl: true,
-    };
+    return { type: "URL Web", hint: "Link valid dan bisa dibuka di tab baru.", isUrl: true };
   }
 
   const normalized = payload.trim();
   const arKeywordRegex = /(ar|marker|target|card|unity|vuforia|model|anchor|scene)/i;
   const looksLikeToken = /^[A-Za-z0-9_\-:.|]{8,}$/;
-
   if (arKeywordRegex.test(normalized) || looksLikeToken.test(normalized)) {
-    return {
-      type: "ID/Token Aplikasi (kemungkinan AR)",
-      hint: "QR ini kemungkinan dipakai internal oleh aplikasi AR, bukan link web langsung.",
-      isUrl: false,
-    };
+    return { type: "ID/Token Aplikasi", hint: "Kemungkinan payload dipakai untuk sistem internal/AR.", isUrl: false };
   }
 
-  return {
-    type: "Teks/Data Biasa",
-    hint: "QR berisi teks/data. Bisa jadi metadata kartu AR.",
-    isUrl: false,
-  };
+  return { type: "Teks/Data Biasa", hint: "QR berisi teks umum.", isUrl: false };
 }
 
 function renderPayloadInfo(payload) {
   const payloadTypeEl = document.getElementById("payloadType");
   const payloadHintEl = document.getElementById("payloadHint");
   const openLinkBtn = document.getElementById("openLinkBtn");
-
   const info = classifyPayload(payload);
 
-  if (payloadTypeEl) {
-    payloadTypeEl.textContent = `Tipe: ${info.type}`;
-  }
-
-  if (payloadHintEl) {
-    payloadHintEl.textContent = info.hint;
-  }
-
+  if (payloadTypeEl) payloadTypeEl.textContent = `Tipe: ${info.type}`;
+  if (payloadHintEl) payloadHintEl.textContent = info.hint;
   if (openLinkBtn) {
     openLinkBtn.disabled = !info.isUrl;
-    openLinkBtn.classList.toggle("d-none", info.isUrl);
+    openLinkBtn.classList.toggle("d-none", !info.isUrl);
   }
 }
 
-// Initialize QR Code Scanner
-async function initializeScanner() {
+function pickBestCamera(cameras) {
+  const mobile = isMobileDevice();
+  const scored = [...cameras].sort((a, b) => {
+    const sa = scoreCamera(a, mobile);
+    const sb = scoreCamera(b, mobile);
+    return sb - sa;
+  });
+  return scored[0] || null;
+}
+
+function scoreCamera(camera, mobile) {
+  const label = (camera?.label || "").toLowerCase();
+  let score = 0;
+  if (/back|rear|environment|belakang|world|main camera/.test(label)) score += 120;
+  if (/main|primary|default|wide/.test(label)) score += 20;
+  if (/front|selfie|user|depan/.test(label)) score -= 100;
+  if (/virtual|obs|droidcam|epoccam/.test(label)) score -= 80;
+  if (/4k|2160|1080|fhd/.test(label)) score += 20;
+  if (mobile && /back|rear|environment|belakang/.test(label)) score += 30;
+  return score;
+}
+
+function getActiveVideoElement() {
+  return document.querySelector("#reader video");
+}
+
+function getSafeMaxZoom(capabilities) {
+  const min = Number.isFinite(capabilities?.zoom?.min) ? capabilities.zoom.min : 1;
+  const max = Number.isFinite(capabilities?.zoom?.max) ? capabilities.zoom.max : min;
+  return max <= min ? min : min + (max - min) * 0.4;
+}
+
+function updateZoomDisplay() {
+  const zoomDisplay = document.getElementById("zoomLevelDisplay");
+  if (zoomDisplay) zoomDisplay.textContent = `${Math.round(currentZoomLevel * 100)}%`;
+}
+
+function setZoomControlsEnabled(enabled) {
+  const zoomInBtn = document.getElementById("zoomInBtn");
+  const zoomOutBtn = document.getElementById("zoomOutBtn");
+  const zoomSlider = document.getElementById("zoomSlider");
+  if (zoomInBtn) zoomInBtn.disabled = !enabled;
+  if (zoomOutBtn) zoomOutBtn.disabled = !enabled;
+  if (zoomSlider) zoomSlider.disabled = !enabled;
+}
+
+async function applyCameraEnhancements() {
+  if (!html5Qr) return;
   try {
-    if (typeof Html5QrcodeScanner === "undefined" || typeof Html5QrcodeSupportedFormats === "undefined") {
-      showError("Library scanner gagal dimuat. Tutup tab lalu buka lagi.");
-      return false;
+    const capabilities = html5Qr.getRunningTrackCapabilities?.();
+    if (!capabilities) return;
+
+    const advanced = [];
+    if (Array.isArray(capabilities.focusMode)) {
+      if (capabilities.focusMode.includes("continuous")) advanced.push({ focusMode: "continuous" });
+      else if (capabilities.focusMode.includes("single-shot")) advanced.push({ focusMode: "single-shot" });
+    }
+    if (Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes("continuous")) advanced.push({ exposureMode: "continuous" });
+    if (Array.isArray(capabilities.whiteBalanceMode) && capabilities.whiteBalanceMode.includes("continuous")) advanced.push({ whiteBalanceMode: "continuous" });
+    if (capabilities.focusDistance && Number.isFinite(capabilities.focusDistance.min)) advanced.push({ focusDistance: capabilities.focusDistance.min });
+
+    if (advanced.length > 0) await html5Qr.applyVideoConstraints({ advanced });
+
+    if (capabilities.zoom) {
+      currentZoomLevel = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
+      updateZoomDisplay();
+      setZoomControlsEnabled(true);
+    } else {
+      setZoomControlsEnabled(false);
+    }
+  } catch {
+    setZoomControlsEnabled(false);
+  }
+}
+
+async function applyZoomFraction(level) {
+  if (!html5Qr) return;
+  try {
+    const capabilities = html5Qr.getRunningTrackCapabilities?.();
+    if (!capabilities?.zoom) return;
+    const min = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
+    const max = getSafeMaxZoom(capabilities);
+    if (max <= min) return;
+
+    const target = Math.max(min, Math.min(max, min + (max - min) * level));
+    await html5Qr.applyVideoConstraints({ advanced: [{ zoom: target }] });
+    currentZoomLevel = target;
+    updateZoomDisplay();
+  } catch {}
+}
+
+async function increaseZoom() {
+  if (!html5Qr) return;
+  try {
+    const capabilities = html5Qr.getRunningTrackCapabilities?.();
+    if (!capabilities?.zoom) return;
+    const min = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
+    const max = getSafeMaxZoom(capabilities);
+    const target = Math.min(max, currentZoomLevel + (max - min) * 0.08);
+    await html5Qr.applyVideoConstraints({ advanced: [{ zoom: target }] });
+    currentZoomLevel = target;
+    updateZoomDisplay();
+  } catch {}
+}
+
+async function decreaseZoom() {
+  if (!html5Qr) return;
+  try {
+    const capabilities = html5Qr.getRunningTrackCapabilities?.();
+    if (!capabilities?.zoom) return;
+    const min = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
+    const max = getSafeMaxZoom(capabilities);
+    const target = Math.max(min, currentZoomLevel - (max - min) * 0.08);
+    await html5Qr.applyVideoConstraints({ advanced: [{ zoom: target }] });
+    currentZoomLevel = target;
+    updateZoomDisplay();
+  } catch {}
+}
+
+function toGrayscale(imageData, contrast = 1.0) {
+  const out = new ImageData(imageData.width, imageData.height);
+  const src = imageData.data;
+  const dst = out.data;
+  for (let i = 0; i < src.length; i += 4) {
+    const gray = 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
+    const adjusted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
+    dst[i] = adjusted;
+    dst[i + 1] = adjusted;
+    dst[i + 2] = adjusted;
+    dst[i + 3] = 255;
+  }
+  return out;
+}
+
+function toBinary(imageData, threshold) {
+  const out = new ImageData(imageData.width, imageData.height);
+  const src = imageData.data;
+  const dst = out.data;
+  for (let i = 0; i < src.length; i += 4) {
+    const value = src[i] > threshold ? 255 : 0;
+    dst[i] = value;
+    dst[i + 1] = value;
+    dst[i + 2] = value;
+    dst[i + 3] = 255;
+  }
+  return out;
+}
+
+function sharpen(imageData, amount = 0.85) {
+  const w = imageData.width;
+  const h = imageData.height;
+  const src = imageData.data;
+  const out = new ImageData(w, h);
+  const dst = out.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const c = src[i];
+      const l = src[(y * w + Math.max(0, x - 1)) * 4];
+      const r = src[(y * w + Math.min(w - 1, x + 1)) * 4];
+      const t = src[(Math.max(0, y - 1) * w + x) * 4];
+      const b = src[(Math.min(h - 1, y + 1) * w + x) * 4];
+      const edge = c * 5 - l - r - t - b;
+      const value = Math.max(0, Math.min(255, Math.round(c * (1 - amount) + edge * amount)));
+      dst[i] = value;
+      dst[i + 1] = value;
+      dst[i + 2] = value;
+      dst[i + 3] = 255;
+    }
+  }
+  return out;
+}
+
+function decodeWithVariants(imageData) {
+  if (typeof jsQR === "undefined" || !imageData) return null;
+  try {
+    const raw = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
+    if (raw) return raw;
+
+    const gray = toGrayscale(imageData, 1.35);
+    const grayHit = jsQR(gray.data, gray.width, gray.height, { inversionAttempts: "attemptBoth" });
+    if (grayHit) return grayHit;
+
+    const sharp = sharpen(gray, 0.9);
+    const sharpHit = jsQR(sharp.data, sharp.width, sharp.height, { inversionAttempts: "attemptBoth" });
+    if (sharpHit) return sharpHit;
+
+    for (const t of [70, 90, 110, 130, 150, 170]) {
+      const bw = toBinary(gray, t);
+      const bwHit = jsQR(bw.data, bw.width, bw.height, { inversionAttempts: "attemptBoth" });
+      if (bwHit) return bwHit;
+
+      const bws = toBinary(sharp, t);
+      const bwsHit = jsQR(bws.data, bws.width, bws.height, { inversionAttempts: "attemptBoth" });
+      if (bwsHit) return bwsHit;
     }
 
-    // Prioritaskan engine alternatif di mobile untuk QR kecil.
-    if (isMobileDevice() && typeof ZXingBrowser !== "undefined") {
-      const altOk = await initializeAlternativeScanner();
-      if (altOk) {
-        console.log("✅ Alternative scanner initialized successfully");
-        return true;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function detectMiniQrFromVideoFrame() {
+  if (fallbackBusy || scannedResult || !html5Qr) return;
+  fallbackBusy = true;
+
+  try {
+    const video = getActiveVideoElement();
+    if (!video || video.readyState < 2) return;
+
+    const vw = video.videoWidth || 0;
+    const vh = video.videoHeight || 0;
+    if (!vw || !vh) return;
+
+    const srcCanvas = document.createElement("canvas");
+    srcCanvas.width = vw;
+    srcCanvas.height = vh;
+    const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
+    if (!srcCtx) return;
+    srcCtx.drawImage(video, 0, 0, vw, vh);
+
+    let hit = decodeWithVariants(srcCtx.getImageData(0, 0, vw, vh));
+
+    if (!hit) {
+      for (const s of [0.7, 0.55, 0.42, 0.32, 0.24, 0.18]) {
+        const cw = Math.floor(vw * s);
+        const ch = Math.floor(vh * s);
+        const sx = Math.floor((vw - cw) / 2);
+        const sy = Math.floor((vh - ch) / 2);
+
+        const up = document.createElement("canvas");
+        up.width = 1200;
+        up.height = 1200;
+        const upCtx = up.getContext("2d", { willReadFrequently: true });
+        if (!upCtx) continue;
+        upCtx.imageSmoothingEnabled = false;
+        upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
+        hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height));
+        if (hit) break;
       }
     }
 
-    const isMobile = isMobileDevice();
+    if (!hit) {
+      const regions = [
+        { x: 0.18, y: 0.18 }, { x: 0.5, y: 0.18 }, { x: 0.82, y: 0.18 },
+        { x: 0.18, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.82, y: 0.5 },
+        { x: 0.18, y: 0.82 }, { x: 0.5, y: 0.82 }, { x: 0.82, y: 0.82 },
+      ];
+      for (const region of regions) {
+        const cw = Math.floor(vw * 0.28);
+        const ch = Math.floor(vh * 0.28);
+        const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * region.x - cw / 2)));
+        const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * region.y - ch / 2)));
 
-    const scannerConfig = {
-      fps: isMobile ? 12 : 20,
-      qrbox: getScannerQrBox(isMobile),
-      rememberLastUsedCamera: false,
-      showTorchButtonIfSupported: true,
-      aspectRatio: isMobile ? 1.3333333 : 1.3333333,
-      videoConstraints: {
-        facingMode: { ideal: "environment" },
-        width: { ideal: isMobile ? 1920 : 1920, min: 1280 },
-        height: { ideal: isMobile ? 1440 : 1440, min: 720 },
-      },
-      disableFlip: true,
-      experimentalFeatures: {
-        useBarCodeDetectorIfSupported: true,
-      },
-      // Force camera untuk mobile
-      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-    };
-
-    // Hanya aktifkan mode kamera (hilangkan tombol "Scan an Image File")
-    if (typeof Html5QrcodeScanType !== "undefined") {
-      scannerConfig.supportedScanTypes = [Html5QrcodeScanType.SCAN_TYPE_CAMERA];
+        const up = document.createElement("canvas");
+        up.width = 1000;
+        up.height = 1000;
+        const upCtx = up.getContext("2d", { willReadFrequently: true });
+        if (!upCtx) continue;
+        upCtx.imageSmoothingEnabled = false;
+        upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
+        hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height));
+        if (hit) break;
+      }
     }
 
-    html5QrcodeScanner = new Html5QrcodeScanner("reader", scannerConfig, false);
+    if (hit?.data) {
+      handleScanSuccess(hit.data, { source: "jsqr-fallback" });
+      return;
+    }
 
-    html5QrcodeScanner.render(onScanSuccess, onScanFailure);
-    scanSessionStartedAt = Date.now();
+    const elapsed = scanStartedAt ? Math.floor((Date.now() - scanStartedAt) / 1000) : 0;
+    if (elapsed > 10) setGuide("Belum terbaca. Coba dekatkan 2-3 cm, lalu geser sedikit menjauh sambil tetap di tengah.", "warning");
+  } finally {
+    fallbackBusy = false;
+  }
+}
+
+function startFallbackLoop() {
+  stopFallbackLoop();
+  if (typeof jsQR === "undefined") return;
+  fallbackIntervalId = setInterval(detectMiniQrFromVideoFrame, 420);
+}
+
+function stopFallbackLoop() {
+  if (fallbackIntervalId) {
+    clearInterval(fallbackIntervalId);
+    fallbackIntervalId = null;
+  }
+}
+
+async function stopScanner() {
+  stopFallbackLoop();
+  if (!html5Qr) return;
+
+  try {
+    const state = html5Qr.getState?.();
+    if (state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED) {
+      await html5Qr.stop();
+    }
+  } catch {}
+
+  try {
+    await html5Qr.clear();
+  } catch {}
+
+  html5Qr = null;
+}
+
+async function startScanner() {
+  if (typeof Html5Qrcode === "undefined") {
+    showStatus("Library scanner gagal dimuat. Tutup tab lalu buka lagi.", "danger");
+    return false;
+  }
+
+  try {
+    if (!html5Qr) {
+      html5Qr = new Html5Qrcode("reader", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE] });
+    }
+
+    const cameras = await Html5Qrcode.getCameras();
+    if (!cameras || cameras.length === 0) {
+      showStatus("Kamera tidak ditemukan di perangkat ini.", "danger");
+      return false;
+    }
+
+    const best = pickBestCamera(cameras);
+    const cameraId = best?.id || cameras[0].id;
+    const preset = isMobileDevice() ? MINI_QR_CONFIG.mobile : MINI_QR_CONFIG.desktop;
+
+    await html5Qr.start(
+      cameraId,
+      {
+        fps: preset.fps,
+        qrbox: preset.qrbox,
+        aspectRatio: 1.3333333,
+        disableFlip: true,
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        videoConstraints: {
+          facingMode: { ideal: "environment" },
+          width: preset.width,
+          height: preset.height,
+        },
+      },
+      (decodedText, decodedResult) => {
+        handleScanSuccess(decodedText, decodedResult || { source: "html5-qrcode" });
+      },
+      () => {},
+    );
+
+    scanStartedAt = Date.now();
     showMiniQrGuideIntro();
-    setZoomControlsEnabled(true);
-    startScannerUiBootstrap();
-    setupPinchToZoom();
-    stabilizeScannerForCard();
-    startRealtimeJsQrFallback();
-    console.log("✅ Scanner initialized successfully");
+    showStatus("Scanner aktif. Arahkan kamera ke QR code.", "secondary");
+    await applyCameraEnhancements();
+    startFallbackLoop();
     return true;
-  } catch (error) {
-    console.error("❌ Error initializing scanner:", error);
-    showError("Gagal memulai scanner. Mohon refresh halaman.");
+  } catch (err) {
+    console.error("Gagal memulai scanner:", err);
+    showStatus("Gagal memulai kamera scanner. Coba refresh halaman.", "danger");
     return false;
   }
 }
 
-// Helper function untuk show error
-function showError(message) {
-  const statusMsg = document.getElementById("statusMessage");
-  if (statusMsg) {
-    statusMsg.innerHTML = `<div class="alert alert-danger">${message}</div>`;
-  }
-}
+async function handleScanSuccess(decodedText, decodedResult) {
+  if (!decodedText || scannedResult) return;
 
-function onScanSuccess(decodedText, decodedResult) {
-  console.log("✅ QR Code terdeteksi:", decodedText);
-  stopRealtimeJsQrFallback();
-  stopAutoCameraCycleFallback();
-
-  // Stop scanning only if scanner is running
-  if (usingAlternativeScanner && alternativeQrScanner) {
-    alternativeQrScanner.stop().catch(() => {});
-    alternativeScannerStarted = false;
-  } else if (html5QrcodeScanner) {
-    try {
-      const state = html5QrcodeScanner.getState();
-      if (state === Html5QrcodeScannerState.SCANNING) {
-        html5QrcodeScanner.pause(true);
-      }
-    } catch (e) {
-      // Silently ignore pause errors from file upload
-    }
-  }
-
-  // Store result
   scannedResult = decodedText;
+  stopFallbackLoop();
 
-  // Show result
-  document.getElementById("resultContainer").classList.remove("d-none");
-  document.getElementById("resultText").textContent = decodedText;
+  if (html5Qr) {
+    try {
+      html5Qr.pause(true);
+    } catch {}
+  }
+
+  const resultContainer = document.getElementById("resultContainer");
+  const resultText = document.getElementById("resultText");
+  if (resultContainer) resultContainer.classList.remove("d-none");
+  if (resultText) resultText.textContent = decodedText;
+
   renderPayloadInfo(decodedText);
-  document.getElementById("statusMessage").innerHTML = '<div class="alert alert-success">✅ QR Code berhasil dibaca!</div>';
-  setScanGuideMessage("QR terdeteksi. Anda bisa lanjut buka link atau scan lagi.", "success");
+  showStatus("✅ QR Code berhasil dibaca!", "success");
+  setGuide("QR terdeteksi. Anda bisa buka link atau scan lagi.", "success");
 
-  // Auto-redirect if URL from camera scan
   if (isValidHttpUrl(decodedText) && decodedResult) {
     setTimeout(() => {
       window.open(decodedText, "_blank");
-    }, 800);
+    }, 700);
   }
 }
 
-function onScanFailure(error) {
-  // Scan failure is expected, ignore
-  // console.log('QR Code tidak terdeteksi:', error);
-}
-
 function openLink() {
-  if (scannedResult) {
-    // Validate if it's a URL
-    if (isValidHttpUrl(scannedResult)) {
-      window.open(scannedResult, "_blank");
-    } else {
-      alert("QR ini bukan link web. Kemungkinan ini ID/token untuk aplikasi AR.");
-    }
+  if (!scannedResult) return;
+  if (isValidHttpUrl(scannedResult)) {
+    window.open(scannedResult, "_blank");
+  } else {
+    alert("QR ini bukan link web. Kemungkinan ID/token untuk aplikasi tertentu.");
   }
 }
 
 async function copyPayload() {
   if (!scannedResult) return;
-
   try {
     await navigator.clipboard.writeText(scannedResult);
-    document.getElementById("statusMessage").innerHTML = '<div class="alert alert-info">📋 Isi QR berhasil disalin.</div>';
-  } catch (error) {
-    console.error("Gagal menyalin payload:", error);
-    document.getElementById("statusMessage").innerHTML = '<div class="alert alert-warning">⚠️ Tidak bisa menyalin otomatis. Salin manual dari hasil scan.</div>';
+    showStatus("��� Isi QR berhasil disalin.", "info");
+  } catch {
+    showStatus("⚠️ Tidak bisa menyalin otomatis. Silakan salin manual dari hasil scan.", "warning");
   }
 }
 
 async function resetScanner() {
-  document.getElementById("resultContainer").classList.add("d-none");
-  document.getElementById("statusMessage").innerHTML = "";
+  const resultContainer = document.getElementById("resultContainer");
   const payloadTypeEl = document.getElementById("payloadType");
   const payloadHintEl = document.getElementById("payloadHint");
+  const resultText = document.getElementById("resultText");
+
+  if (resultContainer) resultContainer.classList.add("d-none");
   if (payloadTypeEl) payloadTypeEl.textContent = "";
   if (payloadHintEl) payloadHintEl.textContent = "";
+  if (resultText) resultText.textContent = "";
+
   scannedResult = null;
-  scanSessionStartedAt = Date.now();
-  lastGuideUpdateAt = 0;
+  scanStartedAt = Date.now();
   showMiniQrGuideIntro();
 
-  // Resume scanning
-  if (usingAlternativeScanner && alternativeQrScanner) {
-    await stopAlternativeScanner();
-    const started = await initializeScanner();
-    if (!started) {
-      showError("Kamera gagal dijalankan ulang. Coba refresh halaman.");
-    }
-  } else if (html5QrcodeScanner) {
-    html5QrcodeScanner.resume();
-    scheduleFocusEnhancement();
-    stabilizeScannerForCard();
-    startRealtimeJsQrFallback();
-    startAutoCameraCycleFallback();
+  if (html5Qr) {
+    try {
+      html5Qr.resume();
+      showStatus("Scanner aktif kembali.", "secondary");
+      startFallbackLoop();
+      return;
+    } catch {}
   }
+
+  await stopScanner();
+  await startScanner();
 }
 
-// Initialize on load
+function decodeQrFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          if (!ctx) {
+            reject(new Error("Canvas context gagal dibuat"));
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0);
+          let hit = decodeWithVariants(ctx.getImageData(0, 0, canvas.width, canvas.height));
+
+          if (!hit) {
+            for (const s of [0.85, 0.7, 0.55, 0.42, 0.3, 0.2]) {
+              const cw = Math.floor(canvas.width * s);
+              const ch = Math.floor(canvas.height * s);
+              const sx = Math.floor((canvas.width - cw) / 2);
+              const sy = Math.floor((canvas.height - ch) / 2);
+
+              const up = document.createElement("canvas");
+              up.width = 1200;
+              up.height = 1200;
+              const upCtx = up.getContext("2d", { willReadFrequently: true });
+              if (!upCtx) continue;
+
+              upCtx.imageSmoothingEnabled = false;
+              upCtx.drawImage(canvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
+              hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height));
+              if (hit) break;
+            }
+          }
+
+          if (hit?.data) resolve(hit.data);
+          else reject(new Error("QR tidak ditemukan pada gambar"));
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      img.onerror = () => reject(new Error("File gambar tidak valid"));
+      img.src = event.target?.result;
+    };
+
+    reader.onerror = () => reject(new Error("Gagal membaca file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 window.addEventListener("load", () => {
   const backBtn = document.getElementById("backBtn");
   const openLinkBtn = document.getElementById("openLinkBtn");
@@ -1367,157 +577,40 @@ window.addEventListener("load", () => {
   const zoomOutBtn = document.getElementById("zoomOutBtn");
   const zoomSlider = document.getElementById("zoomSlider");
 
-  if (backBtn) {
-    backBtn.addEventListener("click", () => {
-      window.history.back();
-    });
-  }
-
-  if (openLinkBtn) {
-    openLinkBtn.addEventListener("click", openLink);
-  }
-
-  if (copyPayloadBtn) {
-    copyPayloadBtn.addEventListener("click", copyPayload);
-  }
-
-  if (resetScannerBtn) {
-    resetScannerBtn.addEventListener("click", resetScanner);
-  }
-
-  // Zoom controls
-  if (zoomInBtn) {
-    zoomInBtn.addEventListener("click", increaseZoom);
-  }
-
-  if (zoomOutBtn) {
-    zoomOutBtn.addEventListener("click", decreaseZoom);
-  }
+  if (backBtn) backBtn.addEventListener("click", () => window.history.back());
+  if (openLinkBtn) openLinkBtn.addEventListener("click", openLink);
+  if (copyPayloadBtn) copyPayloadBtn.addEventListener("click", copyPayload);
+  if (resetScannerBtn) resetScannerBtn.addEventListener("click", resetScanner);
+  if (zoomInBtn) zoomInBtn.addEventListener("click", increaseZoom);
+  if (zoomOutBtn) zoomOutBtn.addEventListener("click", decreaseZoom);
 
   if (zoomSlider) {
     zoomSlider.addEventListener("input", async (e) => {
-      const value = parseFloat(e.target.value);
-      await applyZoomLevel(value);
+      const value = parseFloat(e.target.value || "0");
+      await applyZoomFraction(value);
     });
   }
 
-  // Handle file upload for QR code
   if (qrFileInput) {
-    qrFileInput.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const img = new Image();
-          let wasScannerPaused = false;
-          img.onload = () => {
-            try {
-              // Pause camera scanner only if it's running
-              if (html5QrcodeScanner && html5QrcodeScanner.getState) {
-                try {
-                  const state = html5QrcodeScanner.getState();
-                  if (state === Html5QrcodeScannerState.SCANNING) {
-                    html5QrcodeScanner.pause(true);
-                    wasScannerPaused = true;
-                  }
-                } catch (stateErr) {
-                  console.warn("Could not check scanner state:", stateErr);
-                }
-              }
-
-              // Create canvas and draw image
-              const canvas = document.createElement("canvas");
-              canvas.width = img.width;
-              canvas.height = img.height;
-              const ctx = canvas.getContext("2d");
-              ctx.drawImage(img, 0, 0);
-
-              // Extract image data
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-              // Check if jsQR is available
-              if (typeof jsQR !== "undefined") {
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
-                if (code) {
-                  console.log("✅ QR Code decoded:", code.data);
-                  onScanSuccess(code.data, null);
-
-                  // Auto-redirect if URL
-                  if (isValidHttpUrl(code.data)) {
-                    setTimeout(() => {
-                      window.open(code.data, "_blank");
-                    }, 500);
-                  }
-                } else {
-                  throw new Error("No QR code found in image");
-                }
-              } else {
-                // Fallback: Use html5-qrcode's built-in decoder if available
-                console.warn("jsQR library not available, using html5-qrcode fallback");
-                // Show user message
-                const statusMsg = document.getElementById("statusMessage");
-                if (statusMsg) {
-                  statusMsg.innerHTML = '<div class="alert alert-warning">⚠️ File upload sedang dikembangkan. Gunakan kamera untuk hasil terbaik.</div>';
-                }
-                // Resume scanner only if we paused it
-                if (wasScannerPaused && html5QrcodeScanner) {
-                  try {
-                    html5QrcodeScanner.resume();
-                    scheduleFocusEnhancement();
-                  } catch (e) {
-                    console.warn("Could not resume scanner:", e);
-                  }
-                }
-                qrFileInput.value = "";
-              }
-            } catch (err) {
-              console.error("❌ Error decoding QR:", err);
-              alert(
-                "Gagal membaca QR Code dari gambar.\n\n" +
-                  "Kemungkinan:\n" +
-                  "- Gambar terlalu kecil atau blur\n" +
-                  "- QR Code tidak jelas\n" +
-                  "- Format gambar tidak cocok\n\n" +
-                  "Coba gambar lain dengan QR Code yang lebih jelas.",
-              );
-              // Resume scanner only if we paused it
-              if (wasScannerPaused && html5QrcodeScanner) {
-                try {
-                  html5QrcodeScanner.resume();
-                  scheduleFocusEnhancement();
-                } catch (e) {
-                  console.warn("Could not resume scanner:", e);
-                }
-              }
-              // Reset input
-              qrFileInput.value = "";
-            }
-          };
-          img.onerror = () => {
-            alert("Gagal membaca file gambar. Cek format file Anda.");
-            qrFileInput.value = "";
-          };
-          img.src = event.target.result;
-        };
-        reader.readAsDataURL(file);
+    qrFileInput.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const fromFile = await decodeQrFromFile(file);
+        await handleScanSuccess(fromFile, { source: "file-upload" });
+      } catch {
+        alert("Gagal membaca QR dari gambar. Pastikan gambar tajam, tidak blur, dan QR terlihat jelas.");
+      } finally {
+        qrFileInput.value = "";
       }
     });
   }
 
-  // Tambahkan delay untuk pastikan DOM ready di mobile
   setTimeout(() => {
-    initializeScanner();
-  }, 100);
+    startScanner();
+  }, 120);
 });
 
-// Cleanup on unload
-window.addEventListener("beforeunload", () => {
-  stopScannerUiBootstrap();
-  stopAdaptiveAutoZoom();
-  stopRealtimeJsQrFallback();
-  stopAutoCameraCycleFallback();
-  stopAlternativeScanner();
-  if (html5QrcodeScanner) {
-    html5QrcodeScanner.clear();
-  }
+window.addEventListener("beforeunload", async () => {
+  await stopScanner();
 });
