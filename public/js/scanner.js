@@ -7,6 +7,8 @@ let currentZoomLevel = 1;
 let scanStartedAt = 0;
 let fallbackPhase = 0;
 let fallbackRegionCursor = 0;
+let availableCameras = [];
+let selectedCameraId = null;
 
 const FALLBACK_INTERVAL_MS = 1300;
 const FALLBACK_UPSCALE_SIZE = 900;
@@ -26,6 +28,70 @@ const MINI_QR_CONFIG = {
   mobile: { fps: 12, qrbox: { width: 170, height: 170 }, width: { ideal: 1280, min: 960 }, height: { ideal: 960, min: 540 } },
   desktop: { fps: 15, qrbox: { width: 220, height: 220 }, width: { ideal: 1280, min: 960 }, height: { ideal: 720, min: 540 } },
 };
+
+function getStoredCameraId() {
+  try {
+    return localStorage.getItem("dinasty_scanner_camera_id") || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredCameraId(cameraId) {
+  try {
+    if (cameraId) localStorage.setItem("dinasty_scanner_camera_id", cameraId);
+  } catch {
+    // ignore
+  }
+}
+
+function formatCameraLabel(camera, index) {
+  const label = (camera?.label || "").trim();
+  if (!label) return `Kamera ${index + 1}`;
+  return label;
+}
+
+function renderCameraSelector(cameras, activeId) {
+  const wrap = document.getElementById("cameraSelectorWrap");
+  const select = document.getElementById("cameraSelect");
+  const switchBtn = document.getElementById("switchCameraBtn");
+  if (!wrap || !select || !switchBtn) return;
+
+  select.innerHTML = "";
+
+  if (!cameras || cameras.length === 0) {
+    wrap.classList.add("d-none");
+    return;
+  }
+
+  cameras.forEach((camera, index) => {
+    const option = document.createElement("option");
+    option.value = camera.id;
+    option.textContent = formatCameraLabel(camera, index);
+    select.appendChild(option);
+  });
+
+  if (activeId) select.value = activeId;
+  wrap.classList.remove("d-none");
+  switchBtn.disabled = cameras.length < 2;
+}
+
+function pickCameraByPreference(cameras, preferredCameraId) {
+  if (!cameras || cameras.length === 0) return null;
+
+  if (preferredCameraId) {
+    const preferred = cameras.find((cam) => cam.id === preferredCameraId);
+    if (preferred) return preferred;
+  }
+
+  const storedId = getStoredCameraId();
+  if (storedId) {
+    const stored = cameras.find((cam) => cam.id === storedId);
+    if (stored) return stored;
+  }
+
+  return pickBestCamera(cameras) || cameras[0];
+}
 
 function isMobileDevice() {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -398,7 +464,7 @@ async function stopScanner() {
   html5Qr = null;
 }
 
-async function startScanner() {
+async function startScanner(preferredCameraId = null) {
   if (typeof Html5Qrcode === "undefined") {
     showStatus("Library scanner gagal dimuat. Tutup tab lalu buka lagi.", "danger");
     return false;
@@ -410,13 +476,18 @@ async function startScanner() {
     }
 
     const cameras = await Html5Qrcode.getCameras();
-    if (!cameras || cameras.length === 0) {
+    availableCameras = Array.isArray(cameras) ? cameras : [];
+    if (!availableCameras || availableCameras.length === 0) {
       showStatus("Kamera tidak ditemukan di perangkat ini.", "danger");
       return false;
     }
 
-    const best = pickBestCamera(cameras);
-    const cameraId = best?.id || cameras[0].id;
+    const pickedCamera = pickCameraByPreference(availableCameras, preferredCameraId);
+    const cameraId = pickedCamera?.id || availableCameras[0].id;
+    selectedCameraId = cameraId;
+    saveStoredCameraId(cameraId);
+    renderCameraSelector(availableCameras, cameraId);
+
     const preset = isMobileDevice() ? MINI_QR_CONFIG.mobile : MINI_QR_CONFIG.desktop;
 
     await html5Qr.start(
@@ -452,6 +523,31 @@ async function startScanner() {
     showStatus("Gagal memulai kamera scanner. Coba refresh halaman.", "danger");
     return false;
   }
+}
+
+async function switchCamera(cameraId) {
+  if (!cameraId) return;
+  if (cameraId === selectedCameraId && html5Qr) return;
+
+  showStatus("Mengganti kamera...", "secondary");
+  const hadResult = !!scannedResult;
+  if (hadResult) {
+    const resultContainer = document.getElementById("resultContainer");
+    if (resultContainer) resultContainer.classList.add("d-none");
+    scannedResult = null;
+  }
+
+  await stopScanner();
+  await startScanner(cameraId);
+}
+
+async function switchToNextCamera() {
+  if (!availableCameras || availableCameras.length < 2) return;
+  const currentIndex = availableCameras.findIndex((cam) => cam.id === selectedCameraId);
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % availableCameras.length;
+  const nextCamera = availableCameras[nextIndex];
+  if (!nextCamera) return;
+  await switchCamera(nextCamera.id);
 }
 
 async function handleScanSuccess(decodedText, decodedResult) {
@@ -593,6 +689,8 @@ window.addEventListener("load", () => {
   const zoomInBtn = document.getElementById("zoomInBtn");
   const zoomOutBtn = document.getElementById("zoomOutBtn");
   const zoomSlider = document.getElementById("zoomSlider");
+  const cameraSelect = document.getElementById("cameraSelect");
+  const switchCameraBtn = document.getElementById("switchCameraBtn");
 
   if (backBtn) backBtn.addEventListener("click", () => window.history.back());
   if (openLinkBtn) openLinkBtn.addEventListener("click", openLink);
@@ -600,6 +698,20 @@ window.addEventListener("load", () => {
   if (resetScannerBtn) resetScannerBtn.addEventListener("click", resetScanner);
   if (zoomInBtn) zoomInBtn.addEventListener("click", increaseZoom);
   if (zoomOutBtn) zoomOutBtn.addEventListener("click", decreaseZoom);
+
+  if (cameraSelect) {
+    cameraSelect.addEventListener("change", async (e) => {
+      const cameraId = e.target.value;
+      await switchCamera(cameraId);
+    });
+  }
+
+  if (switchCameraBtn) {
+    switchCameraBtn.addEventListener("click", async () => {
+      await switchToNextCamera();
+      if (cameraSelect && selectedCameraId) cameraSelect.value = selectedCameraId;
+    });
+  }
 
   if (zoomSlider) {
     zoomSlider.addEventListener("input", async (e) => {
