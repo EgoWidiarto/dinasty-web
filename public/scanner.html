@@ -34,30 +34,6 @@
       <div class="flex-grow-1 d-flex flex-column justify-content-center align-items-center p-3">
         <div id="reader" class="rounded-4 overflow-hidden" style="width: 100%; max-width: 400px; border: 3px solid #d6a732"></div>
 
-        <!-- Scan Mode Selector -->
-        <div class="mt-3 btn-group btn-group-sm" role="group" aria-label="Scan mode selector" style="width: 100%; max-width: 400px">
-          <button type="button" class="btn btn-outline-light active" id="normalModeBtn">Normal</button>
-          <button type="button" class="btn btn-outline-warning" id="miniModeBtn">Mini QR</button>
-        </div>
-
-        <!-- Camera Selector -->
-        <div id="cameraSelectorWrap" class="mt-3 d-flex align-items-center gap-2 d-none" style="width: 100%; max-width: 400px">
-          <select id="cameraSelect" class="form-select form-select-sm"></select>
-          <button class="btn btn-sm btn-outline-light" id="switchCameraBtn" type="button">Ganti</button>
-        </div>
-
-        <!-- Zoom Controls -->
-        <div class="mt-3 d-flex align-items-center gap-2" style="width: 100%; max-width: 400px; justify-content: center">
-          <button class="btn btn-sm btn-outline-light rounded-circle" id="zoomOutBtn" title="Zoom Keluar">
-            <span>−</span>
-          </button>
-          <input type="range" id="zoomSlider" min="0" max="1" step="0.1" value="0" class="flex-grow-1" style="height: 6px; cursor: pointer" title="Geser untuk zoom" />
-          <button class="btn btn-sm btn-outline-light rounded-circle" id="zoomInBtn" title="Zoom Masuk">
-            <span>+</span>
-          </button>
-          <span id="zoomLevelDisplay" class="text-light small" style="min-width: 40px; text-align: center">100%</span>
-        </div>
-
         <!-- Upload File Button -->
         <div class="mt-4">
           <label for="qrFileInput" class="btn btn-secondary btn-sm rounded-3"> 📁 Unggah Gambar QR Code </label>
@@ -66,25 +42,6 @@
 
         <!-- Status Messages -->
         <div id="statusMessage" class="mt-4 text-center"></div>
-
-        <!-- Mini QR Guidance -->
-        <div id="scanGuide" class="mt-2 small text-warning text-center" style="max-width: 400px"></div>
-
-        <!-- Result Display -->
-        <div id="resultContainer" class="d-none mt-4 w-100 max-width-400">
-          <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <h4 class="alert-heading fw-bold">QR Code Terdeteksi!</h4>
-            <p id="payloadType" class="mb-1 fw-semibold small text-dark"></p>
-            <p id="resultText" class="mb-0"></p>
-            <p id="payloadHint" class="mt-2 mb-0 small text-dark"></p>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-          </div>
-          <div class="d-grid gap-2">
-            <button class="btn btn-primary btn-lg fw-bold rounded-3" id="openLinkBtn"> Buka Link </button>
-            <button class="btn btn-warning fw-bold rounded-3" id="copyPayloadBtn"> Salin Isi QR </button>
-            <button class="btn btn-outline-secondary rounded-3" id="resetScannerBtn"> Scan Lagi </button>
-          </div>
-        </div>
       </div>
 
       <!-- Controls -->
