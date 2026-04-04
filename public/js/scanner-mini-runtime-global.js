@@ -20,7 +20,7 @@
   const boot = async () => {
     try {
       if (typeof window.QrScanner === "undefined") {
-        await loadScript("/vendor/qr-scanner.umd.min.js?v=20260404-3");
+        await loadScript("/js/libs/qr-scanner.umd.min.js?v=20260404-9");
       }
 
       await loadScript("/js/scanner.js?v=20260404-8");
