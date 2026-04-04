@@ -7,6 +7,8 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const NO_STORE_CACHE = "no-store, no-cache, must-revalidate, proxy-revalidate";
+
 // Middleware
 app.use(
   helmet({
@@ -25,8 +27,28 @@ app.use(
 );
 app.use(cors());
 app.use(express.json());
+
+app.use((req, res, next) => {
+  if (req.path === "/sw.js" || req.path === "/" || req.path === "/chatbot" || req.path === "/scanner" || req.path.endsWith(".html")) {
+    res.setHeader("Cache-Control", NO_STORE_CACHE);
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+
+  if (req.path.includes("qr-scanner")) {
+    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+  }
+
+  next();
+});
+
 app.use("/vendor", express.static(path.join(__dirname, "node_modules")));
 app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Cache-Control", NO_STORE_CACHE);
+  res.sendFile(path.join(__dirname, "public", "sw.js"));
+});
 
 // Routes
 app.get("/", (req, res) => {

@@ -1,5 +1,31 @@
+const CLIENT_BUILD_VERSION = "2026-04-05-3";
+
+async function resetClientCachesIfNeeded() {
+  const lastVersion = localStorage.getItem("dinasty-client-version");
+  if (lastVersion === CLIENT_BUILD_VERSION) return;
+
+  try {
+    if ("serviceWorker" in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch (error) {
+    console.warn("Cache reset gagal:", error);
+  }
+
+  localStorage.setItem("dinasty-client-version", CLIENT_BUILD_VERSION);
+  window.location.reload();
+}
+
 // Service Worker Registration dengan auto-reload saat update
 if ("serviceWorker" in navigator) {
+  resetClientCachesIfNeeded().catch((error) => console.warn(error));
+
   let refreshing = false;
 
   // Detect controller change dan reload
