@@ -12,9 +12,13 @@ let selectedCameraId = null;
 let nativeBarcodeDetector = null;
 let nativeDetectBusy = false;
 let scanMode = "normal";
+let miniAggressiveTick = 0;
 
 const FALLBACK_INTERVAL_MS = 1300;
 const FALLBACK_UPSCALE_SIZE = 900;
+const MINI_UPSCALE_SIZE = 1200;
+const MINI_DEEP_PASS_EVERY = 3;
+const MINI_CENTER_SCALES = [0.42, 0.34, 0.28, 0.22];
 const FALLBACK_GRID = [
   { x: 0.2, y: 0.2 },
   { x: 0.5, y: 0.2 },
@@ -28,8 +32,8 @@ const FALLBACK_GRID = [
 ];
 
 const MINI_QR_CONFIG = {
-  mobile: { fps: 12, qrbox: { width: 170, height: 170 }, width: { ideal: 1280, min: 960 }, height: { ideal: 960, min: 540 } },
-  desktop: { fps: 15, qrbox: { width: 220, height: 220 }, width: { ideal: 1280, min: 960 }, height: { ideal: 720, min: 540 } },
+  mobile: { fps: 10, qrbox: { width: 160, height: 160 }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 } },
+  desktop: { fps: 12, qrbox: { width: 200, height: 200 }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 } },
 };
 
 const NORMAL_QR_CONFIG = {
@@ -498,7 +502,7 @@ async function detectWithNativeBarcodeDetector(videoEl) {
     const vh = videoEl.videoHeight || 0;
     if (!vw || !vh) return null;
 
-    const cropScale = scanMode === "mini" ? 0.38 : 0.5;
+    const cropScale = scanMode === "mini" ? 0.3 : 0.5;
     const cropCanvas = document.createElement("canvas");
     cropCanvas.width = FALLBACK_UPSCALE_SIZE;
     cropCanvas.height = FALLBACK_UPSCALE_SIZE;
@@ -556,8 +560,9 @@ function detectMiniQrFromVideoFrame() {
     }
 
     const up = document.createElement("canvas");
-    up.width = FALLBACK_UPSCALE_SIZE;
-    up.height = FALLBACK_UPSCALE_SIZE;
+    const upscaleSize = scanMode === "mini" ? MINI_UPSCALE_SIZE : FALLBACK_UPSCALE_SIZE;
+    up.width = upscaleSize;
+    up.height = upscaleSize;
     const upCtx = up.getContext("2d", { willReadFrequently: true });
     if (!upCtx) return;
     upCtx.imageSmoothingEnabled = false;
@@ -608,6 +613,22 @@ function detectMiniQrFromVideoFrame() {
 
     if (scanMode === "mini") {
       fallbackPhase = (fallbackPhase + 1) % 3;
+      miniAggressiveTick += 1;
+
+      // Deep-pass berkala untuk QR sangat kecil: multi center-crop + decode penuh.
+      if (!hit && miniAggressiveTick % MINI_DEEP_PASS_EVERY === 0) {
+        for (const scale of MINI_CENTER_SCALES) {
+          const cw = Math.floor(vw * scale);
+          const ch = Math.floor(vh * scale);
+          const sx = Math.floor((vw - cw) / 2);
+          const sy = Math.floor((vh - ch) / 2);
+          upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
+
+          // normal mode decode (lebih berat) sengaja dipanggil berkala saja.
+          hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height), "normal");
+          if (hit) break;
+        }
+      }
     }
 
     if (hit?.data) {
@@ -705,6 +726,7 @@ async function startScanner(preferredCameraId = null) {
     scanStartedAt = Date.now();
     fallbackPhase = 0;
     fallbackRegionCursor = 0;
+    miniAggressiveTick = 0;
     setActiveMode(scanMode);
     showMiniQrGuideIntro();
     showStatus("Scanner aktif. Arahkan kamera ke QR code.", "secondary");
@@ -803,6 +825,7 @@ async function resetScanner() {
 
   scannedResult = null;
   scanStartedAt = Date.now();
+  miniAggressiveTick = 0;
   showMiniQrGuideIntro();
 
   if (html5Qr) {
