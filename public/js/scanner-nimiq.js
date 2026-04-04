@@ -1,43 +1,9 @@
-let QrScanner = window.QrScanner;
-
-async function ensureQrScannerLoaded() {
-  if (window.QrScanner) {
-    QrScanner = window.QrScanner;
-    return QrScanner;
-  }
-
-  const candidates = ["https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js", "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"];
-
-  for (const src of candidates) {
-    try {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        script.src = src;
-        script.async = true;
-        script.onload = resolve;
-        script.onerror = () => reject(new Error(`Gagal memuat ${src}`));
-        document.head.appendChild(script);
-      });
-
-      if (window.QrScanner) {
-        QrScanner = window.QrScanner;
-        return QrScanner;
-      }
-    } catch {
-      // coba URL berikutnya
-    }
-  }
-
-  throw new Error("QrScanner tidak tersedia. Gagal memuat library qr-scanner.");
-}
+import QrScanner from "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js";
 
 class DinastyMiniQrScanner {
   constructor() {
     this.readerEl = document.getElementById("reader");
     this.statusEl = document.getElementById("statusMessage");
-    this.guideEl = document.getElementById("scanGuide");
-    this.normalModeBtn = document.getElementById("normalModeBtn");
-    this.miniModeBtn = document.getElementById("miniModeBtn");
     this.fileInput = document.getElementById("qrFileInput");
     this.backBtn = document.getElementById("backBtn");
 
@@ -52,7 +18,6 @@ class DinastyMiniQrScanner {
     this.readerEl.appendChild(this.video);
 
     this.qrScanner = null;
-    this.scanMode = "mini";
     this.lastResult = "";
     this.lastResultAt = 0;
 
@@ -64,47 +29,12 @@ class DinastyMiniQrScanner {
       window.location.href = "index.html";
     });
 
-    this.normalModeBtn?.addEventListener("click", () => this.setMode("normal"));
-    this.miniModeBtn?.addEventListener("click", () => this.setMode("mini"));
-
     this.fileInput?.addEventListener("change", async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
       await this.scanImageFile(file);
       e.target.value = "";
     });
-  }
-
-  setGuide(message) {
-    if (this.guideEl) this.guideEl.textContent = message;
-  }
-
-  syncModeButtons() {
-    const isMini = this.scanMode === "mini";
-
-    this.normalModeBtn?.classList.toggle("active", !isMini);
-    this.normalModeBtn?.classList.toggle("btn-light", !isMini);
-    this.normalModeBtn?.classList.toggle("btn-outline-light", isMini);
-
-    this.miniModeBtn?.classList.toggle("active", isMini);
-    this.miniModeBtn?.classList.toggle("btn-warning", isMini);
-    this.miniModeBtn?.classList.toggle("btn-outline-warning", !isMini);
-  }
-
-  async setMode(mode) {
-    const nextMode = mode === "normal" ? "normal" : "mini";
-    if (this.scanMode === nextMode) return;
-
-    this.scanMode = nextMode;
-    this.syncModeButtons();
-
-    if (this.scanMode === "mini") {
-      this.setGuide("Mode Mini aktif: fokuskan QR kecil di tengah.");
-    } else {
-      this.setGuide("Mode Normal aktif: cocok untuk QR ukuran standar.");
-    }
-
-    await this.start();
   }
 
   setStatus(message, type = "info") {
@@ -125,16 +55,14 @@ class DinastyMiniQrScanner {
     const vw = this.video.videoWidth || 1280;
     const vh = this.video.videoHeight || 720;
 
-    const ratio = this.scanMode === "mini" ? 0.38 : 0.72;
-    const minSide = this.scanMode === "mini" ? 200 : 280;
-    const side = Math.max(minSide, Math.round(Math.min(vw, vh) * ratio));
+    const side = Math.max(200, Math.round(Math.min(vw, vh) * 0.38));
     return {
       x: Math.round((vw - side) / 2),
       y: Math.round((vh - side) / 2),
       width: side,
       height: side,
-      downScaledWidth: this.scanMode === "mini" ? 1280 : 960,
-      downScaledHeight: this.scanMode === "mini" ? 1280 : 960,
+      downScaledWidth: 1280,
+      downScaledHeight: 1280,
     };
   }
 
@@ -146,7 +74,7 @@ class DinastyMiniQrScanner {
 
     this.qrScanner = new QrScanner(this.video, (result) => this.onDecode(result), {
       preferredCamera: "environment",
-      maxScansPerSecond: this.scanMode === "mini" ? 35 : 22,
+      maxScansPerSecond: 35,
       returnDetailedScanResult: true,
       calculateScanRegion: () => this.getScanRegion(),
       highlightScanRegion: true,
@@ -215,11 +143,11 @@ class DinastyMiniQrScanner {
   async start() {
     try {
       this.setStatus("Menyiapkan kamera...", "info");
-      this.syncModeButtons();
 
       if (this.qrScanner) {
         this.qrScanner.stop();
       }
+
       this.createScanner();
       const bestRearCameraId = await this.pickBestRearCameraId();
       if (bestRearCameraId) {
@@ -229,14 +157,7 @@ class DinastyMiniQrScanner {
       }
 
       await this.applyCameraQualityConstraints();
-
-      if (this.scanMode === "mini") {
-        this.setGuide("Mode Mini aktif: fokuskan QR kecil di tengah.");
-      } else {
-        this.setGuide("Mode Normal aktif: cocok untuk QR ukuran standar.");
-      }
-
-      this.setStatus("Scanner siap. Arahkan ke QR Code...", "success");
+      this.setStatus("Scanner mini siap. Arahkan QR kecil ke tengah.", "success");
     } catch (err) {
       this.setStatus("Kamera gagal dibuka. Cek izin kamera browser.", "danger");
       console.error("Scanner start error:", err);
@@ -293,18 +214,6 @@ class DinastyMiniQrScanner {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  ensureQrScannerLoaded()
-    .then(() => {
-      QrScanner.WORKER_PATH = "https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js";
-      const app = new DinastyMiniQrScanner();
-      app.start();
-    })
-    .catch((err) => {
-      console.error(err);
-      const statusEl = document.getElementById("statusMessage");
-      if (statusEl) {
-        statusEl.className = "mt-4 text-center text-danger";
-        statusEl.textContent = "Library scanner gagal dimuat. Coba refresh halaman (Ctrl+F5).";
-      }
-    });
+  const app = new DinastyMiniQrScanner();
+  app.start();
 });
