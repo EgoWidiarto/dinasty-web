@@ -1,5 +1,5 @@
 // Service Worker
-const CACHE_NAME = "dinamika-v12";
+const CACHE_NAME = "dinamika-v13";
 const urlsToCache = [
   "/",
   "/index.html",
@@ -8,8 +8,8 @@ const urlsToCache = [
   "/css/style.css",
   "/js/app.js",
   "/js/chatbot.js",
-  "/js/scanner-mini-runtime-global.js?v=20260404-6",
-  "/vendor/qr-scanner.umd.min.js?v=20260404-2",
+  "/js/scanner-mini-runtime-global.js?v=20260404-7",
+  "/vendor/qr-scanner.umd.min.js?v=20260404-3",
   "/vendor/qr-scanner-worker.min.js",
   "/manifest.json",
 ];
