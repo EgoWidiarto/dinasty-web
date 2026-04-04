@@ -9,6 +9,9 @@ let fallbackPhase = 0;
 let fallbackRegionCursor = 0;
 let availableCameras = [];
 let selectedCameraId = null;
+let nativeBarcodeDetector = null;
+let nativeDetectBusy = false;
+let scanMode = "normal";
 
 const FALLBACK_INTERVAL_MS = 1300;
 const FALLBACK_UPSCALE_SIZE = 900;
@@ -28,6 +31,44 @@ const MINI_QR_CONFIG = {
   mobile: { fps: 12, qrbox: { width: 170, height: 170 }, width: { ideal: 1280, min: 960 }, height: { ideal: 960, min: 540 } },
   desktop: { fps: 15, qrbox: { width: 220, height: 220 }, width: { ideal: 1280, min: 960 }, height: { ideal: 720, min: 540 } },
 };
+
+const NORMAL_QR_CONFIG = {
+  mobile: { fps: 10, qrbox: { width: 260, height: 260 }, width: { ideal: 1280, min: 960 }, height: { ideal: 720, min: 540 } },
+  desktop: { fps: 12, qrbox: { width: 320, height: 320 }, width: { ideal: 1280, min: 960 }, height: { ideal: 720, min: 540 } },
+};
+
+function getCurrentScanPreset() {
+  const isMobile = isMobileDevice();
+  return scanMode === "mini" ? (isMobile ? MINI_QR_CONFIG.mobile : MINI_QR_CONFIG.desktop) : isMobile ? NORMAL_QR_CONFIG.mobile : NORMAL_QR_CONFIG.desktop;
+}
+
+function setActiveMode(nextMode) {
+  scanMode = nextMode === "mini" ? "mini" : "normal";
+  const miniBtn = document.getElementById("miniModeBtn");
+  const normalBtn = document.getElementById("normalModeBtn");
+
+  if (miniBtn) miniBtn.classList.toggle("active", scanMode === "mini");
+  if (normalBtn) normalBtn.classList.toggle("active", scanMode === "normal");
+
+  const guideText = scanMode === "mini" ? "Mode Mini QR aktif: crop tengah, zoom lebih agresif, dan scan lebih sensitif untuk QR kecil." : "Mode Normal aktif: scan lebih ringan untuk QR ukuran biasa dan lebih cepat.";
+  setGuide(guideText, scanMode === "mini" ? "warning" : "success");
+}
+
+function initNativeBarcodeDetector() {
+  try {
+    if (typeof BarcodeDetector === "undefined") return null;
+    if (nativeBarcodeDetector) return nativeBarcodeDetector;
+
+    const formats = Array.isArray(BarcodeDetector.getSupportedFormats?.()) ? BarcodeDetector.getSupportedFormats() : [];
+    if (!formats.includes("qr_code")) return null;
+
+    nativeBarcodeDetector = new BarcodeDetector({ formats: ["qr_code"] });
+    return nativeBarcodeDetector;
+  } catch {
+    nativeBarcodeDetector = null;
+    return null;
+  }
+}
 
 function getStoredCameraId() {
   try {
@@ -91,6 +132,73 @@ function pickCameraByPreference(cameras, preferredCameraId) {
   }
 
   return pickBestCamera(cameras) || cameras[0];
+}
+
+async function probeCameraQuality(cameraId) {
+  let stream = null;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        deviceId: { exact: cameraId },
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+    });
+
+    const track = stream.getVideoTracks()[0];
+    const capabilities = track?.getCapabilities?.() || {};
+    const settings = track?.getSettings?.() || {};
+
+    const width = Number.isFinite(capabilities?.width?.max) ? capabilities.width.max : Number(settings.width || 0);
+    const height = Number.isFinite(capabilities?.height?.max) ? capabilities.height.max : Number(settings.height || 0);
+    const frameRate = Number.isFinite(capabilities?.frameRate?.max) ? capabilities.frameRate.max : Number(settings.frameRate || 0);
+
+    let score = width * height + frameRate * 2000;
+    if (capabilities?.zoom) score += 150000;
+    if (capabilities?.focusMode) score += 100000;
+    if (capabilities?.torch) score += 50000;
+
+    return { cameraId, score };
+  } catch {
+    return { cameraId, score: 0 };
+  } finally {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+  }
+}
+
+async function pickBestCameraAsync(cameras, preferredCameraId = null) {
+  if (!cameras || cameras.length === 0) return null;
+
+  if (preferredCameraId) {
+    const preferred = cameras.find((cam) => cam.id === preferredCameraId);
+    if (preferred) return preferred;
+  }
+
+  const storedId = getStoredCameraId();
+  if (storedId) {
+    const stored = cameras.find((cam) => cam.id === storedId);
+    if (stored) return stored;
+  }
+
+  const labelRanked = pickBestCamera(cameras);
+  const candidates = cameras
+    .map((camera) => ({ camera, labelScore: scoreCamera(camera, isMobileDevice()) }))
+    .sort((a, b) => b.labelScore - a.labelScore)
+    .slice(0, Math.min(3, cameras.length));
+
+  const probed = await Promise.all(candidates.map((item) => probeCameraQuality(item.camera.id)));
+  const bestProbe = probed.sort((a, b) => b.score - a.score)[0];
+  if (bestProbe?.cameraId) {
+    const camera = cameras.find((cam) => cam.id === bestProbe.cameraId);
+    if (camera) return camera;
+  }
+
+  return labelRanked || cameras[0];
 }
 
 function isMobileDevice() {
@@ -222,6 +330,16 @@ async function applyCameraEnhancements() {
       currentZoomLevel = Number.isFinite(capabilities.zoom.min) ? capabilities.zoom.min : 1;
       updateZoomDisplay();
       setZoomControlsEnabled(true);
+      if (scanMode === "mini") {
+        const miniTarget = Math.min(getSafeMaxZoom(capabilities), currentZoomLevel + (getSafeMaxZoom(capabilities) - currentZoomLevel) * 0.25);
+        try {
+          await html5Qr.applyVideoConstraints({ advanced: [{ zoom: miniTarget }] });
+          currentZoomLevel = miniTarget;
+          updateZoomDisplay();
+        } catch {
+          // ignore
+        }
+      }
     } else {
       setZoomControlsEnabled(false);
     }
@@ -363,6 +481,50 @@ function decodeWithVariants(imageData, mode = "normal") {
   }
 }
 
+async function detectWithNativeBarcodeDetector(videoEl) {
+  const detector = initNativeBarcodeDetector();
+  if (!detector || !videoEl || videoEl.readyState < 2) return null;
+  if (nativeDetectBusy) return null;
+
+  nativeDetectBusy = true;
+
+  try {
+    const results = await detector.detect(videoEl);
+    if (Array.isArray(results) && results.length > 0) {
+      return results[0].rawValue || null;
+    }
+
+    const vw = videoEl.videoWidth || 0;
+    const vh = videoEl.videoHeight || 0;
+    if (!vw || !vh) return null;
+
+    const cropScale = scanMode === "mini" ? 0.38 : 0.5;
+    const cropCanvas = document.createElement("canvas");
+    cropCanvas.width = FALLBACK_UPSCALE_SIZE;
+    cropCanvas.height = FALLBACK_UPSCALE_SIZE;
+    const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
+    if (!cropCtx) return null;
+    cropCtx.imageSmoothingEnabled = false;
+
+    const sw = Math.floor(vw * cropScale);
+    const sh = Math.floor(vh * cropScale);
+    const sx = Math.floor((vw - sw) / 2);
+    const sy = Math.floor((vh - sh) / 2);
+    cropCtx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, cropCanvas.width, cropCanvas.height);
+
+    const cropResults = await detector.detect(cropCanvas);
+    if (Array.isArray(cropResults) && cropResults.length > 0) {
+      return cropResults[0].rawValue || null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  } finally {
+    nativeDetectBusy = false;
+  }
+}
+
 function detectMiniQrFromVideoFrame() {
   if (fallbackBusy || scannedResult || !html5Qr) return;
   fallbackBusy = true;
@@ -382,6 +544,17 @@ function detectMiniQrFromVideoFrame() {
     if (!srcCtx) return;
     srcCtx.drawImage(video, 0, 0, vw, vh);
 
+    // Native browser detector dulu; ini biasanya paling kuat untuk QR normal-kecil.
+    // Kalau browser mendukung, kita prioritaskan ini.
+    if (nativeBarcodeDetector) {
+      detectWithNativeBarcodeDetector(video).then((nativeValue) => {
+        if (nativeValue && !scannedResult) {
+          handleScanSuccess(nativeValue, { source: "barcode-detector" });
+        }
+      });
+      if (scanMode === "normal") return;
+    }
+
     const up = document.createElement("canvas");
     up.width = FALLBACK_UPSCALE_SIZE;
     up.height = FALLBACK_UPSCALE_SIZE;
@@ -391,13 +564,27 @@ function detectMiniQrFromVideoFrame() {
 
     let hit = null;
 
-    // Phase 0: full frame ringan
-    if (fallbackPhase === 0) {
+    // Mode normal: cukup full-frame + center-crop ringan, jangan grid berat.
+    if (scanMode === "normal") {
+      hit = decodeWithVariants(srcCtx.getImageData(0, 0, vw, vh), "fast");
+      if (!hit) {
+        const scale = 0.52;
+        const cw = Math.floor(vw * scale);
+        const ch = Math.floor(vh * scale);
+        const sx = Math.floor((vw - cw) / 2);
+        const sy = Math.floor((vh - ch) / 2);
+        upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, up.width, up.height);
+        hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height), "fast");
+      }
+    }
+
+    // Mode mini: fase penuh lebih agresif.
+    if (scanMode === "mini" && fallbackPhase === 0) {
       hit = decodeWithVariants(srcCtx.getImageData(0, 0, vw, vh), "fast");
     }
 
     // Phase 1: crop tengah (umumnya mini QR ada di sini)
-    if (!hit && fallbackPhase === 1) {
+    if (scanMode === "mini" && !hit && fallbackPhase === 1) {
       const scale = 0.38;
       const cw = Math.floor(vw * scale);
       const ch = Math.floor(vh * scale);
@@ -408,7 +595,7 @@ function detectMiniQrFromVideoFrame() {
     }
 
     // Phase 2: 1 region grid per tick (bukan semua sekaligus, biar tidak lag)
-    if (!hit && fallbackPhase === 2) {
+    if (scanMode === "mini" && !hit && fallbackPhase === 2) {
       const region = FALLBACK_GRID[fallbackRegionCursor % FALLBACK_GRID.length];
       fallbackRegionCursor += 1;
       const cw = Math.floor(vw * 0.28);
@@ -419,7 +606,9 @@ function detectMiniQrFromVideoFrame() {
       hit = decodeWithVariants(upCtx.getImageData(0, 0, up.width, up.height), "fast");
     }
 
-    fallbackPhase = (fallbackPhase + 1) % 3;
+    if (scanMode === "mini") {
+      fallbackPhase = (fallbackPhase + 1) % 3;
+    }
 
     if (hit?.data) {
       handleScanSuccess(hit.data, { source: "jsqr-fallback" });
@@ -436,7 +625,8 @@ function detectMiniQrFromVideoFrame() {
 function startFallbackLoop() {
   stopFallbackLoop();
   if (typeof jsQR === "undefined") return;
-  fallbackIntervalId = setInterval(detectMiniQrFromVideoFrame, FALLBACK_INTERVAL_MS);
+  const intervalMs = scanMode === "mini" ? FALLBACK_INTERVAL_MS : 1800;
+  fallbackIntervalId = setInterval(detectMiniQrFromVideoFrame, intervalMs);
 }
 
 function stopFallbackLoop() {
@@ -471,6 +661,8 @@ async function startScanner(preferredCameraId = null) {
   }
 
   try {
+    initNativeBarcodeDetector();
+
     if (!html5Qr) {
       html5Qr = new Html5Qrcode("reader", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE] });
     }
@@ -482,13 +674,13 @@ async function startScanner(preferredCameraId = null) {
       return false;
     }
 
-    const pickedCamera = pickCameraByPreference(availableCameras, preferredCameraId);
+    const pickedCamera = await pickBestCameraAsync(availableCameras, preferredCameraId);
     const cameraId = pickedCamera?.id || availableCameras[0].id;
     selectedCameraId = cameraId;
     saveStoredCameraId(cameraId);
     renderCameraSelector(availableCameras, cameraId);
 
-    const preset = isMobileDevice() ? MINI_QR_CONFIG.mobile : MINI_QR_CONFIG.desktop;
+    const preset = getCurrentScanPreset();
 
     await html5Qr.start(
       cameraId,
@@ -513,6 +705,7 @@ async function startScanner(preferredCameraId = null) {
     scanStartedAt = Date.now();
     fallbackPhase = 0;
     fallbackRegionCursor = 0;
+    setActiveMode(scanMode);
     showMiniQrGuideIntro();
     showStatus("Scanner aktif. Arahkan kamera ke QR code.", "secondary");
     await applyCameraEnhancements();
@@ -691,6 +884,8 @@ window.addEventListener("load", () => {
   const zoomSlider = document.getElementById("zoomSlider");
   const cameraSelect = document.getElementById("cameraSelect");
   const switchCameraBtn = document.getElementById("switchCameraBtn");
+  const normalModeBtn = document.getElementById("normalModeBtn");
+  const miniModeBtn = document.getElementById("miniModeBtn");
 
   if (backBtn) backBtn.addEventListener("click", () => window.history.back());
   if (openLinkBtn) openLinkBtn.addEventListener("click", openLink);
@@ -710,6 +905,22 @@ window.addEventListener("load", () => {
     switchCameraBtn.addEventListener("click", async () => {
       await switchToNextCamera();
       if (cameraSelect && selectedCameraId) cameraSelect.value = selectedCameraId;
+    });
+  }
+
+  if (normalModeBtn) {
+    normalModeBtn.addEventListener("click", async () => {
+      if (scanMode === "normal") return;
+      setActiveMode("normal");
+      await resetScanner();
+    });
+  }
+
+  if (miniModeBtn) {
+    miniModeBtn.addEventListener("click", async () => {
+      if (scanMode === "mini") return;
+      setActiveMode("mini");
+      await resetScanner();
     });
   }
 
@@ -736,6 +947,7 @@ window.addEventListener("load", () => {
   }
 
   setTimeout(() => {
+    setActiveMode(scanMode);
     startScanner();
   }, 120);
 });
