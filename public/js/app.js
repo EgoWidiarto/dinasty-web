@@ -12,9 +12,20 @@ if ("serviceWorker" in navigator) {
   });
 
   navigator.serviceWorker
-    .register("sw.js")
+    .register("/sw.js")
     .then((registration) => {
       console.log("✅ Service Worker berhasil didaftarkan");
+
+      registration.addEventListener("updatefound", () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
+
+        newWorker.addEventListener("statechange", () => {
+          if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+            newWorker.postMessage({ type: "SKIP_WAITING" });
+          }
+        });
+      });
 
       // Check for updates setiap 30 detik
       setInterval(() => {

@@ -1,115 +1,98 @@
-// Service Worker
-const CACHE_NAME = "dinamika-v18";
-const urlsToCache = [
+const CACHE_VERSION = "dinasty-static-v2026-04-05-1";
+const APP_SHELL = [
   "/",
   "/index.html",
+  "/chatbot",
+  "/scanner",
   "/chatbot.html",
   "/scanner.html",
   "/css/style.css",
   "/js/app.js",
   "/js/chatbot.js",
-  "/js/scanner.js?v=20260404-8",
-  "/js/scanner-nimiq.js",
-  "/js/scanner-mini-runtime-global.js",
-  "/js/libs/qr-scanner.umd.min.js?v=20260404-11",
-  "/js/libs/qr-scanner-worker.min.js?v=20260404-11",
+  "/js/scanner.js",
   "/manifest.json",
+  "/vendor/qr-scanner.umd.min.js",
+  "/vendor/qr-scanner-worker.min.js",
+  "/assets/component/logo-dinasty.png",
+  "/assets/component/back_btn.png",
+  "/assets/component/chatbot_icon.png",
+  "/assets/component/scaner_icon.png",
+  "/assets/component/bg_dinasty.png",
+  "/assets/component/bg_chatbot.png",
 ];
 
-// Install event - skip waiting untuk langsung aktif
 self.addEventListener("install", (event) => {
-  self.skipWaiting(); // Aktifkan service worker baru langsung
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      console.log("✅ Cache opened");
-
-      await Promise.allSettled(
-        urlsToCache.map(async (url) => {
+    caches.open(CACHE_VERSION).then(async (cache) => {
+      await Promise.all(
+        APP_SHELL.map(async (asset) => {
           try {
-            await cache.add(url);
+            await cache.add(asset);
           } catch (error) {
-            console.warn("⚠️ Gagal pre-cache:", url, error);
+            console.warn("SW cache skip:", asset, error);
           }
         }),
       );
     }),
   );
+
+  self.skipWaiting();
 });
 
-// Activate event
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log("🗑️ Deleting old cache:", cacheName);
-            return caches.delete(cacheName);
-          }
-        }),
-      ).then(() => {
-        // Claim semua clients agar service worker baru langsung aktif
-        return self.clients.claim();
-      });
-    }),
-  );
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_VERSION).map((oldKey) => caches.delete(oldKey)))));
+
+  self.clients.claim();
 });
 
-// Fetch event
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    const cache = await caches.open(CACHE_VERSION);
+    cache.put(request, response.clone());
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    return cached || caches.match("/index.html");
+  }
+}
+
+async function staleWhileRevalidate(request) {
+  const cached = await caches.match(request);
+  const fetchPromise = fetch(request)
+    .then(async (response) => {
+      const cache = await caches.open(CACHE_VERSION);
+      cache.put(request, response.clone());
+      return response;
+    })
+    .catch(() => null);
+
+  return cached || fetchPromise || Response.error();
+}
+
 self.addEventListener("fetch", (event) => {
-  // Only handle GET requests
-  if (event.request.method !== "GET") {
+  const { request } = event;
+
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(request));
     return;
   }
 
-  // Abaikan skema non-http(s), contoh: chrome-extension://
-  const requestUrl = new URL(event.request.url);
-  if (requestUrl.protocol !== "http:" && requestUrl.protocol !== "https:") {
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirst(request));
     return;
   }
 
-  // Skip API calls - let them go through network
-  if (event.request.url.includes("/api/")) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => response)
-        .catch(() => {
-          return new Response("Offline - API tidak tersedia", {
-            status: 503,
-            statusText: "Service Unavailable",
-          });
-        }),
-    );
-    return;
+  event.respondWith(staleWhileRevalidate(request));
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
   }
-
-  // Network first strategy for HTML/CSS/JS
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        if (!response || response.status !== 200) {
-          return response;
-        }
-
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone).catch((err) => {
-            console.warn("Lewati cache untuk request ini:", event.request.url, err);
-          });
-        });
-
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request).then((response) => {
-          if (response) {
-            return response;
-          }
-          return new Response("Halaman tidak tersedia offline", {
-            status: 404,
-            statusText: "Not Found",
-          });
-        });
-      }),
-  );
 });

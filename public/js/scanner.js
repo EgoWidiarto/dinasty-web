@@ -1,397 +1,380 @@
-(() => {
-  "use strict";
+/* global QrScanner */
+let qrScanner = null;
+let isScanning = false;
+let torchEnabled = false;
+let zoomSupported = false;
+let autoZoomTimer = null;
+let lastScanAt = 0;
+let lastScannedValue = "";
 
-  const readerEl = document.getElementById("reader");
-  const statusEl = document.getElementById("statusMessage");
-  const fileInputEl = document.getElementById("qrFileInput");
-  const backBtnEl = document.getElementById("backBtn");
+const videoEl = document.getElementById("qrVideo");
+const statusEl = document.getElementById("statusMessage");
+const resultCardEl = document.getElementById("scanResultCard");
+const resultTextEl = document.getElementById("scanResultText");
+const resultMetaEl = document.getElementById("scanResultMeta");
+const startBtn = document.getElementById("startScanBtn");
+const stopBtn = document.getElementById("stopScanBtn");
+const torchBtn = document.getElementById("toggleTorchBtn");
+const zoomInBtn = document.getElementById("zoomInBtn");
+const zoomOutBtn = document.getElementById("zoomOutBtn");
+const zoomSlider = document.getElementById("zoomSlider");
+const zoomLabel = document.getElementById("zoomLevelDisplay");
+const openBtn = document.getElementById("openResultBtn");
+const copyBtn = document.getElementById("copyResultBtn");
 
-  const zoomInBtnEl = document.getElementById("zoomInBtn");
-  const zoomOutBtnEl = document.getElementById("zoomOutBtn");
-  const zoomSliderEl = document.getElementById("zoomSlider");
-  const zoomLevelDisplayEl = document.getElementById("zoomLevelDisplay");
-  const torchBtnEl = document.getElementById("torchBtn");
+function setStatus(message) {
+  if (statusEl) statusEl.textContent = message;
+}
 
-  if (!readerEl || !statusEl || !fileInputEl || !backBtnEl) return;
+function showResult(text, meta = "") {
+  if (!resultCardEl || !resultTextEl || !resultMetaEl) return;
+  resultCardEl.classList.remove("d-none");
+  resultTextEl.textContent = text;
+  resultMetaEl.textContent = meta;
+}
 
-  let scanner = null;
-  let handledResult = false;
-  let lastScannedText = "";
-  let torchOn = false;
+function resetResult() {
+  if (!resultCardEl || !resultTextEl || !resultMetaEl) return;
+  resultCardEl.classList.add("d-none");
+  resultTextEl.textContent = "";
+  resultMetaEl.textContent = "";
+}
 
-  const videoEl = document.createElement("video");
-  videoEl.setAttribute("playsinline", "true");
-  videoEl.style.width = "100%";
-  videoEl.style.height = "100%";
-  videoEl.style.objectFit = "cover";
-  videoEl.style.borderRadius = "1rem";
+function isLikelyUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
-  readerEl.innerHTML = "";
-  readerEl.appendChild(videoEl);
+function getTrack() {
+  const stream = videoEl?.srcObject;
+  if (!stream) return null;
+  const tracks = stream.getVideoTracks();
+  return tracks.length ? tracks[0] : null;
+}
 
-  const isValidHttpUrl = (value) => {
-    try {
-      const url = new URL(value);
-      return url.protocol === "http:" || url.protocol === "https:";
-    } catch {
-      return false;
+function updateZoomLabel(value) {
+  if (!zoomLabel) return;
+  const numeric = Number(value) || 1;
+  zoomLabel.textContent = `${Math.round(numeric * 100)}%`;
+}
+
+function setZoomControlsEnabled(enabled) {
+  const hasControls = enabled && zoomSupported;
+  if (zoomInBtn) zoomInBtn.disabled = !hasControls;
+  if (zoomOutBtn) zoomOutBtn.disabled = !hasControls;
+  if (zoomSlider) zoomSlider.disabled = !hasControls;
+}
+
+async function applyZoom(nextZoom) {
+  const track = getTrack();
+  if (!track || !zoomSupported || !zoomSlider) return;
+
+  const min = Number(zoomSlider.min);
+  const max = Number(zoomSlider.max);
+  const clamped = Math.min(max, Math.max(min, nextZoom));
+
+  try {
+    await track.applyConstraints({ advanced: [{ zoom: clamped }] });
+    zoomSlider.value = String(clamped);
+    updateZoomLabel(clamped);
+  } catch (error) {
+    console.warn("Gagal set zoom:", error);
+  }
+}
+
+async function setupZoomControls() {
+  const track = getTrack();
+  if (!track || !zoomSlider) return;
+
+  const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+  const settings = track.getSettings ? track.getSettings() : {};
+
+  if (!capabilities.zoom) {
+    zoomSupported = false;
+    updateZoomLabel(1);
+    setZoomControlsEnabled(false);
+    return;
+  }
+
+  zoomSupported = true;
+  zoomSlider.min = String(capabilities.zoom.min ?? 1);
+  zoomSlider.max = String(capabilities.zoom.max ?? 3);
+  zoomSlider.step = String(capabilities.zoom.step ?? 0.1);
+
+  const defaultZoom = settings.zoom ?? Number(zoomSlider.min);
+  zoomSlider.value = String(defaultZoom);
+  updateZoomLabel(defaultZoom);
+
+  setZoomControlsEnabled(true);
+}
+
+function startAutoZoomAssist() {
+  if (!zoomSupported || autoZoomTimer) return;
+
+  const levels = [0.15, 0.3, 0.45, 0.6, 0.78, 0.9];
+  let levelIndex = 0;
+
+  autoZoomTimer = window.setInterval(async () => {
+    if (!isScanning || !zoomSlider) return;
+
+    const now = Date.now();
+    const isRecentlyDetected = now - lastScanAt < 3000;
+    if (isRecentlyDetected) return;
+
+    const min = Number(zoomSlider.min);
+    const max = Number(zoomSlider.max);
+    const ratio = levels[levelIndex % levels.length];
+    const targetZoom = min + (max - min) * ratio;
+
+    await applyZoom(targetZoom);
+    levelIndex += 1;
+  }, 1300);
+}
+
+function stopAutoZoomAssist() {
+  if (!autoZoomTimer) return;
+  window.clearInterval(autoZoomTimer);
+  autoZoomTimer = null;
+}
+
+async function setupTorchButton() {
+  if (!torchBtn || !qrScanner) return;
+  try {
+    const hasFlash = await qrScanner.hasFlash();
+    torchBtn.disabled = !hasFlash;
+  } catch {
+    torchBtn.disabled = true;
+  }
+}
+
+async function logScannedUrl(value) {
+  try {
+    await fetch("/api/qr/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: value,
+        timestamp: new Date().toISOString(),
+      }),
+    });
+  } catch (error) {
+    console.warn("Gagal kirim log QR:", error);
+  }
+}
+
+async function fetchQrInfo(value) {
+  try {
+    const response = await fetch(`/api/qr/validate?url=${encodeURIComponent(value)}`);
+    const data = await response.json();
+
+    if (data.success) {
+      return `${data.title} — ${data.description}`;
     }
-  };
+  } catch {
+    // Silent fallback
+  }
+  return "QR terdeteksi.";
+}
 
-  const setStatus = (message, type = "info") => {
-    const map = {
-      info: "text-warning",
-      success: "text-success",
-      error: "text-danger",
-      muted: "text-secondary",
-    };
+function onDecodeError(error) {
+  if (!error) return;
+  const text = String(error);
+  if (text.includes("No QR code found")) return;
+  console.debug("Decode issue:", error);
+}
 
-    statusEl.className = `mt-4 text-center ${map[type] || map.info}`;
-    statusEl.textContent = message;
-  };
+async function handleDecode(result) {
+  const raw = typeof result === "string" ? result : result?.data;
+  if (!raw) return;
 
-  const logScan = async (urlText) => {
-    try {
-      await fetch("/api/qr/log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: urlText,
-          timestamp: new Date().toISOString(),
-        }),
-      });
-    } catch {
-      // Non-blocking
+  const now = Date.now();
+  if (raw === lastScannedValue && now - lastScanAt < 1800) return;
+
+  lastScannedValue = raw;
+  lastScanAt = now;
+
+  const meta = await fetchQrInfo(raw);
+  showResult(raw, meta);
+  setStatus("QR berhasil terbaca. Anda bisa scan lagi atau buka hasil.");
+
+  await logScannedUrl(raw);
+}
+
+async function createScanner() {
+  if (!window.QrScanner) {
+    throw new Error("Library QR scanner tidak ditemukan.");
+  }
+
+  if (qrScanner) return;
+
+  qrScanner = new QrScanner(
+    videoEl,
+    handleDecode,
+    {
+      preferredCamera: "environment",
+      maxScansPerSecond: 25,
+      highlightScanRegion: true,
+      highlightCodeOutline: true,
+      returnDetailedScanResult: true,
+      calculateScanRegion: (video) => {
+        const smaller = Math.min(video.videoWidth, video.videoHeight);
+        const scanSize = Math.floor(smaller * 0.92);
+        return {
+          x: Math.floor((video.videoWidth - scanSize) / 2),
+          y: Math.floor((video.videoHeight - scanSize) / 2),
+          width: scanSize,
+          height: scanSize,
+          downScaledWidth: 1200,
+          downScaledHeight: 1200,
+        };
+      },
+    },
+    onDecodeError,
+  );
+
+  if (typeof qrScanner.setInversionMode === "function") {
+    qrScanner.setInversionMode("both");
+  }
+
+  if (typeof QrScanner.setGrayscaleWeights === "function") {
+    QrScanner.setGrayscaleWeights(77, 150, 29, true);
+  }
+}
+
+async function startScanner() {
+  try {
+    await createScanner();
+    resetResult();
+    setStatus("Meminta izin kamera...");
+
+    await qrScanner.start();
+    isScanning = true;
+
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    await setupZoomControls();
+    await setupTorchButton();
+    startAutoZoomAssist();
+
+    setStatus("Scanner aktif. Arahkan kamera ke QR mini pada kotak panduan.");
+  } catch (error) {
+    console.error(error);
+    setStatus("Gagal memulai scanner. Pastikan izin kamera aktif.");
+  }
+}
+
+async function stopScanner() {
+  stopAutoZoomAssist();
+
+  if (qrScanner && isScanning) {
+    await qrScanner.stop();
+  }
+
+  isScanning = false;
+  torchEnabled = false;
+
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  if (torchBtn) {
+    torchBtn.textContent = "Senter";
+    torchBtn.disabled = true;
+  }
+  setZoomControlsEnabled(false);
+
+  setStatus("Scanner dihentikan.");
+}
+
+function bindUi() {
+  const backBtn = document.getElementById("backBtn");
+
+  backBtn?.addEventListener("click", () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.href = "/";
     }
-  };
+  });
 
-  const showCopyButton = (text) => {
-    const wrapper = document.createElement("div");
-    wrapper.className = "mt-2";
+  startBtn?.addEventListener("click", startScanner);
+  stopBtn?.addEventListener("click", stopScanner);
 
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "btn btn-warning btn-sm";
-    copyBtn.textContent = "Salin Isi QR";
+  torchBtn?.addEventListener("click", async () => {
+    if (!qrScanner || !isScanning || torchBtn.disabled) return;
 
-    copyBtn.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(text);
-        setStatus("Isi QR berhasil disalin.", "success");
-      } catch {
-        setStatus("Gagal menyalin isi QR.", "error");
+    try {
+      torchEnabled = !torchEnabled;
+      if (torchEnabled) {
+        await qrScanner.turnFlashOn();
+        torchBtn.textContent = "Senter Off";
+      } else {
+        await qrScanner.turnFlashOff();
+        torchBtn.textContent = "Senter";
       }
-    });
-
-    wrapper.appendChild(copyBtn);
-    statusEl.appendChild(document.createElement("br"));
-    statusEl.appendChild(wrapper);
-  };
-
-  const handleDecodedText = async (decodedText, source = "camera") => {
-    const rawText = (decodedText || "").trim();
-    if (!rawText) return;
-
-    if (rawText === lastScannedText && handledResult) return;
-
-    handledResult = true;
-    lastScannedText = rawText;
-
-    await logScan(rawText);
-
-    if (source === "camera" && scanner) {
-      await scanner.stop().catch(() => {});
-    }
-
-    if (isValidHttpUrl(rawText)) {
-      setStatus("QR berhasil dibaca. Membuka link...", "success");
-      setTimeout(() => {
-        window.location.href = rawText;
-      }, 500);
-      return;
-    }
-
-    setStatus(`QR terbaca: ${rawText}`, "success");
-    showCopyButton(rawText);
-  };
-
-  const getVideoTrack = () => {
-    const stream = videoEl.srcObject;
-    if (!stream || typeof stream.getVideoTracks !== "function") return null;
-    return stream.getVideoTracks()[0] || null;
-  };
-
-  const getTrackZoomRange = () => {
-    const track = getVideoTrack();
-    if (!track || typeof track.getCapabilities !== "function") return null;
-
-    const caps = track.getCapabilities();
-    const zoomCap = caps?.zoom;
-
-    if (zoomCap === undefined) return null;
-
-    if (typeof zoomCap === "number") {
-      return { min: 1, max: zoomCap, step: 0.1 };
-    }
-
-    if (typeof zoomCap === "object") {
-      return {
-        min: Number.isFinite(zoomCap.min) ? zoomCap.min : 1,
-        max: Number.isFinite(zoomCap.max) ? zoomCap.max : 1,
-        step: Number.isFinite(zoomCap.step) && zoomCap.step > 0 ? zoomCap.step : 0.1,
-      };
-    }
-
-    return null;
-  };
-
-  const getCurrentZoom = () => {
-    const track = getVideoTrack();
-    if (!track || typeof track.getSettings !== "function") return null;
-    const settings = track.getSettings();
-    return Number.isFinite(settings.zoom) ? settings.zoom : null;
-  };
-
-  const updateZoomUi = (currentZoom, range) => {
-    if (!zoomSliderEl || !zoomLevelDisplayEl) return;
-    if (!range) {
-      zoomSliderEl.disabled = true;
-      zoomInBtnEl && (zoomInBtnEl.disabled = true);
-      zoomOutBtnEl && (zoomOutBtnEl.disabled = true);
-      zoomLevelDisplayEl.textContent = "100%";
-      return;
-    }
-
-    const clamped = Math.min(range.max, Math.max(range.min, currentZoom ?? range.min));
-    const normalized = range.max === range.min ? 0 : ((clamped - range.min) / (range.max - range.min)) * 100;
-
-    zoomSliderEl.disabled = false;
-    zoomSliderEl.value = String(Math.round(normalized));
-    zoomInBtnEl && (zoomInBtnEl.disabled = false);
-    zoomOutBtnEl && (zoomOutBtnEl.disabled = false);
-
-    const ratio = range.min > 0 ? clamped / range.min : clamped;
-    zoomLevelDisplayEl.textContent = `${Math.round(ratio * 100)}%`;
-  };
-
-  const setZoom = async (normalizedValue) => {
-    const range = getTrackZoomRange();
-    if (!range) return;
-
-    const value = Math.min(100, Math.max(0, normalizedValue));
-    const targetZoom = range.min + ((range.max - range.min) * value) / 100;
-
-    const track = getVideoTrack();
-    if (!track || typeof track.applyConstraints !== "function") return;
-
-    try {
-      await track.applyConstraints({
-        advanced: [{ zoom: targetZoom }],
-      });
-      updateZoomUi(getCurrentZoom(), range);
-    } catch {
-      // ignore unsupported zoom operations
-    }
-  };
-
-  const changeZoomStep = async (direction) => {
-    const range = getTrackZoomRange();
-    if (!range) return;
-
-    const current = getCurrentZoom() ?? range.min;
-    const target = direction > 0 ? current + range.step * 4 : current - range.step * 4;
-    const normalized = ((target - range.min) / (range.max - range.min || 1)) * 100;
-    await setZoom(normalized);
-  };
-
-  const setupZoomControls = () => {
-    if (!zoomSliderEl) return;
-
-    zoomSliderEl.addEventListener("input", (event) => {
-      const value = Number(event.target.value || 0);
-      setZoom(value);
-    });
-
-    zoomInBtnEl?.addEventListener("click", () => {
-      changeZoomStep(1);
-    });
-
-    zoomOutBtnEl?.addEventListener("click", () => {
-      changeZoomStep(-1);
-    });
-  };
-
-  const setupTorchButton = async () => {
-    if (!torchBtnEl || !scanner) return;
-
-    try {
-      const hasFlash = await scanner.hasFlash();
-      if (!hasFlash) {
-        torchBtnEl.classList.add("d-none");
-        return;
-      }
-
-      torchBtnEl.classList.remove("d-none");
-      torchBtnEl.textContent = "Nyalakan Senter";
-
-      torchBtnEl.addEventListener("click", async () => {
-        try {
-          torchOn = !torchOn;
-          await scanner.toggleFlash();
-          torchBtnEl.textContent = torchOn ? "Matikan Senter" : "Nyalakan Senter";
-        } catch {
-          setStatus("Senter tidak tersedia di perangkat ini.", "muted");
-        }
-      });
-    } catch {
-      torchBtnEl.classList.add("d-none");
-    }
-  };
-
-  const setupPinchToZoom = () => {
-    let startDistance = null;
-    let startNormalizedZoom = null;
-
-    const getTouchDistance = (touches) => {
-      const [a, b] = touches;
-      const dx = a.clientX - b.clientX;
-      const dy = a.clientY - b.clientY;
-      return Math.hypot(dx, dy);
-    };
-
-    readerEl.addEventListener(
-      "touchstart",
-      (event) => {
-        if (event.touches.length !== 2) return;
-        const range = getTrackZoomRange();
-        if (!range) return;
-
-        startDistance = getTouchDistance(event.touches);
-        const currentZoom = getCurrentZoom() ?? range.min;
-        startNormalizedZoom = ((currentZoom - range.min) / (range.max - range.min || 1)) * 100;
-      },
-      { passive: true },
-    );
-
-    readerEl.addEventListener(
-      "touchmove",
-      (event) => {
-        if (event.touches.length !== 2 || startDistance === null || startNormalizedZoom === null) return;
-
-        const currentDistance = getTouchDistance(event.touches);
-        const delta = ((currentDistance - startDistance) / startDistance) * 100;
-        const target = startNormalizedZoom + delta;
-        setZoom(target);
-      },
-      { passive: true },
-    );
-
-    readerEl.addEventListener(
-      "touchend",
-      () => {
-        startDistance = null;
-        startNormalizedZoom = null;
-      },
-      { passive: true },
-    );
-  };
-
-  const setupFileScan = () => {
-    fileInputEl.addEventListener("change", async (event) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      setStatus("Memproses gambar QR...", "info");
-
-      try {
-        const result = await QrScanner.scanImage(file, {
-          returnDetailedScanResult: true,
-          alsoTryWithoutScanRegion: true,
-        });
-
-        await handleDecodedText(result?.data || "", "file");
-      } catch {
-        setStatus("QR tidak ditemukan pada gambar. Coba foto lain yang lebih jelas.", "error");
-        handledResult = false;
-      } finally {
-        fileInputEl.value = "";
-      }
-    });
-  };
-
-  const initScanner = async () => {
-    if (typeof window.QrScanner === "undefined") {
-      setStatus("Library scanner tidak berhasil dimuat.", "error");
-      return;
-    }
-
-    setupZoomControls();
-    setupPinchToZoom();
-    setupFileScan();
-
-    setStatus("Memulai kamera...", "info");
-
-    scanner = new QrScanner(
-      videoEl,
-      (result) => {
-        const data = typeof result === "string" ? result : result?.data;
-        handleDecodedText(data, "camera");
-      },
-      {
-        preferredCamera: "environment",
-        maxScansPerSecond: 25,
-        returnDetailedScanResult: true,
-        highlightScanRegion: true,
-        calculateScanRegion: (video) => {
-          const minEdge = Math.min(video.videoWidth || 0, video.videoHeight || 0);
-          const size = Math.max(180, Math.round(minEdge * 0.52));
-
-          return {
-            x: Math.round(((video.videoWidth || size) - size) / 2),
-            y: Math.round(((video.videoHeight || size) - size) / 2),
-            width: size,
-            height: size,
-            downScaledWidth: 640,
-            downScaledHeight: 640,
-          };
-        },
-      },
-    );
-
-    try {
-      await scanner.start();
-      handledResult = false;
-      setStatus("Scanner aktif. Dekatkan kamera ke QR kecil di area kotak tengah.", "info");
-
-      updateZoomUi(getCurrentZoom(), getTrackZoomRange());
-      await setupTorchButton();
     } catch (error) {
-      const message = String(error?.message || error || "").toLowerCase();
-
-      if (message.includes("permission") || message.includes("denied") || message.includes("notallowed")) {
-        setStatus("Izin kamera ditolak. Aktifkan izin kamera lalu muat ulang halaman.", "error");
-        return;
-      }
-
-      if (message.includes("notfound") || message.includes("no camera")) {
-        setStatus("Kamera tidak ditemukan di perangkat ini.", "error");
-        return;
-      }
-
-      setStatus("Gagal memulai scanner. Coba refresh halaman.", "error");
-    }
-  };
-
-  backBtnEl.addEventListener("click", () => {
-    window.location.href = "/";
-  });
-
-  window.addEventListener("beforeunload", () => {
-    if (scanner) {
-      scanner.stop().catch(() => {});
-      scanner.destroy();
+      torchEnabled = false;
+      torchBtn.textContent = "Senter";
+      console.warn("Senter tidak didukung:", error);
     }
   });
 
-  initScanner();
-})();
+  zoomSlider?.addEventListener("input", async (event) => {
+    await applyZoom(Number(event.target.value));
+  });
+
+  zoomInBtn?.addEventListener("click", async () => {
+    if (!zoomSlider) return;
+    await applyZoom(Number(zoomSlider.value) + Number(zoomSlider.step || 0.1));
+  });
+
+  zoomOutBtn?.addEventListener("click", async () => {
+    if (!zoomSlider) return;
+    await applyZoom(Number(zoomSlider.value) - Number(zoomSlider.step || 0.1));
+  });
+
+  copyBtn?.addEventListener("click", async () => {
+    const value = resultTextEl?.textContent?.trim();
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setStatus("Isi QR berhasil disalin.");
+    } catch {
+      setStatus("Gagal menyalin isi QR.");
+    }
+  });
+
+  openBtn?.addEventListener("click", () => {
+    const value = resultTextEl?.textContent?.trim();
+    if (!value || !isLikelyUrl(value)) {
+      setStatus("Hasil scan bukan URL yang valid.");
+      return;
+    }
+
+    window.open(value, "_blank", "noopener,noreferrer");
+  });
+
+  document.addEventListener("visibilitychange", async () => {
+    if (document.hidden && isScanning) {
+      await stopScanner();
+    }
+  });
+
+  window.addEventListener("beforeunload", async () => {
+    if (qrScanner) {
+      stopAutoZoomAssist();
+      await qrScanner.stop();
+      qrScanner.destroy();
+      qrScanner = null;
+    }
+  });
+}
+
+window.addEventListener("load", () => {
+  bindUi();
+  setStatus('Siap memindai QR mini. Tekan "Mulai Scan".');
+});
