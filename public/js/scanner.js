@@ -1,6 +1,7 @@
 /* global Html5Qrcode */
 let scanner = null;
 let scannerRunning = false;
+let scannerTransitioning = false;
 let torchEnabled = false;
 let zoomSupported = false;
 let cameraId = null;
@@ -169,20 +170,20 @@ async function toggleTorch() {
 }
 
 async function startScanner() {
+  if (scannerRunning || scannerTransitioning) return;
+  scannerTransitioning = true;
+
   try {
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = true;
+
     resetResult();
     setStatus("Meminta izin kamera...");
 
     await setupCamera();
 
     await scanner.start(
-      {
-        deviceId: { exact: cameraId },
-        facingMode: "environment",
-        width: { ideal: 1920 },
-        height: { ideal: 1920 },
-        frameRate: { ideal: 30, max: 60 },
-      },
+      cameraId,
       {
         fps: 20,
         qrbox: (vw, vh) => {
@@ -191,6 +192,12 @@ async function startScanner() {
         },
         aspectRatio: 1,
         disableFlip: false,
+        videoConstraints: {
+          width: { ideal: 1920 },
+          height: { ideal: 1920 },
+          frameRate: { ideal: 30, max: 60 },
+          facingMode: "environment",
+        },
       },
       onDecode,
       () => {
@@ -199,33 +206,44 @@ async function startScanner() {
     );
 
     scannerRunning = true;
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = false;
 
     await setupZoomAndTorchCapabilities();
     setStatus("Scanner aktif (tanpa auto zoom). Dekatkan QR mini 8-12 cm dan tahan stabil.");
   } catch (error) {
     console.error(error);
     setStatus("Gagal memulai scanner. Pastikan izin kamera aktif.");
+    if (startBtn) startBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = true;
+  } finally {
+    scannerTransitioning = false;
   }
 }
 
 async function stopScanner() {
-  if (scanner && scannerRunning) {
-    await scanner.stop();
-    await scanner.clear();
-  }
+  if (scannerTransitioning) return;
+  scannerTransitioning = true;
 
-  scannerRunning = false;
-  torchEnabled = false;
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  if (torchBtn) {
-    torchBtn.textContent = "Senter";
-    torchBtn.disabled = true;
+  try {
+    if (scanner && scannerRunning) {
+      await scanner.stop();
+      await scanner.clear();
+    }
+
+    scannerRunning = false;
+    torchEnabled = false;
+    if (startBtn) startBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = true;
+    if (torchBtn) {
+      torchBtn.textContent = "Senter";
+      torchBtn.disabled = true;
+    }
+    setZoomControlsEnabled(false);
+    setStatus("Scanner dihentikan.");
+  } finally {
+    scannerTransitioning = false;
   }
-  setZoomControlsEnabled(false);
-  setStatus("Scanner dihentikan.");
 }
 
 function bindUi() {
