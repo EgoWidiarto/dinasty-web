@@ -1,4 +1,8 @@
-import QrScanner from "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js";
+const QrScanner = window.QrScanner;
+
+if (!QrScanner) {
+  throw new Error("QrScanner tidak tersedia. Pastikan script qr-scanner sudah dimuat.");
+}
 
 QrScanner.WORKER_PATH = "https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js";
 
