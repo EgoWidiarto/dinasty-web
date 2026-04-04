@@ -1,6 +1,6 @@
 // Service Worker
-const CACHE_NAME = "dinamika-v6";
-const urlsToCache = ["/", "/index.html", "/chatbot.html", "/scanner.html", "/css/style.css", "/js/app.js", "/js/chatbot.js", "/js/scanner.js", "/manifest.json"];
+const CACHE_NAME = "dinamika-v7";
+const urlsToCache = ["/", "/index.html", "/chatbot.html", "/scanner.html", "/css/style.css", "/js/app.js", "/js/chatbot.js", "/js/scanner-nimiq.js", "/manifest.json"];
 
 // Install event - skip waiting untuk langsung aktif
 self.addEventListener("install", (event) => {
