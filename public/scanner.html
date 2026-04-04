@@ -16,12 +16,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/style.css" />
-    <!-- QR Code Scanner Library -->
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-    <!-- Alternative QR Scanner Library (ZXing browser) -->
-    <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
-    <!-- jsQR Library for file-based QR decoding -->
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   </head>
   <body class="bg-dark text-white scanner-page">
     <div class="container-fluid vh-100 d-flex flex-column px-0">
@@ -101,7 +95,7 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Scanner Script -->
-    <script src="js/scanner-zxing.js"></script>
+    <!-- Scanner Script (Nimiq qr-scanner) -->
+    <script type="module" src="js/scanner-nimiq.js"></script>
   </body>
 </html>
