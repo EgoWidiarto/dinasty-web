@@ -123,8 +123,9 @@ class DinastyMiniQrScanner {
         let s = 0;
 
         if (/back|rear|environment|belakang/.test(label)) s += 100;
-        if (/main|utama|primary/.test(label)) s += 40;
-        if (/wide|ultra|macro|depth|tof|iris|front|selfie/.test(label)) s -= 60;
+        if (/main|utama|primary/.test(label)) s += 120;
+        if (/tele|zoom/.test(label)) s += 20;
+        if (/wide|ultra|macro|depth|tof|iris|front|selfie/.test(label)) s -= 220;
 
         return s;
       };
@@ -150,17 +151,11 @@ class DinastyMiniQrScanner {
       advanced.push({ focusMode: "continuous" });
     }
 
-    if (typeof caps.zoom?.max === "number") {
-      const min = caps.zoom.min ?? 1;
-      const max = caps.zoom.max ?? min;
-      const target = min + (max - min) * 0.3;
-      advanced.push({ zoom: target });
-    }
-
     try {
       await track.applyConstraints({
         width: { ideal: 1920 },
         height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 30 },
         advanced,
       });
     } catch {
