@@ -1,4 +1,4 @@
-const CACHE_VERSION = "dinasty-static-v2026-04-05-3";
+const CACHE_VERSION = "dinasty-static-v2026-04-05-4";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -11,8 +11,6 @@ const APP_SHELL = [
   "/js/chatbot.js",
   "/js/scanner.js",
   "/manifest.json",
-  "/js/libs/qr-scanner.umd.min.js",
-  "/js/libs/qr-scanner-worker.min.js",
   "/assets/component/logo-dinasty.png",
   "/assets/component/back_btn.png",
   "/assets/component/chatbot_icon.png",

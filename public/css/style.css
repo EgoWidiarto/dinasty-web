@@ -1056,6 +1056,13 @@ body.scanner-page #reader .scanner-torch-btn:active {
   object-fit: cover;
 }
 
+#qrVideo video,
+#qrVideo canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
 .scanner-overlay {
   position: absolute;
   inset: 0;

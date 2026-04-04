@@ -1,12 +1,12 @@
-/* global QrScanner */
-let qrScanner = null;
-let isScanning = false;
+/* global Html5Qrcode */
+let scanner = null;
+let scannerRunning = false;
 let torchEnabled = false;
 let zoomSupported = false;
+let cameraId = null;
 let lastScanAt = 0;
 let lastScannedValue = "";
 
-const videoEl = document.getElementById("qrVideo");
 const statusEl = document.getElementById("statusMessage");
 const resultCardEl = document.getElementById("scanResultCard");
 const resultTextEl = document.getElementById("scanResultText");
@@ -48,122 +48,16 @@ function isLikelyUrl(value) {
   }
 }
 
-function getTrack() {
-  const stream = videoEl?.srcObject;
-  if (!stream) return null;
-  const tracks = stream.getVideoTracks();
-  return tracks.length ? tracks[0] : null;
+function setZoomControlsEnabled(enabled) {
+  const active = enabled && zoomSupported;
+  if (zoomInBtn) zoomInBtn.disabled = !active;
+  if (zoomOutBtn) zoomOutBtn.disabled = !active;
+  if (zoomSlider) zoomSlider.disabled = !active;
 }
 
 function updateZoomLabel(value) {
   if (!zoomLabel) return;
-  const numeric = Number(value) || 1;
-  zoomLabel.textContent = `${Math.round(numeric * 100)}%`;
-}
-
-function setZoomControlsEnabled(enabled) {
-  const hasControls = enabled && zoomSupported;
-  if (zoomInBtn) zoomInBtn.disabled = !hasControls;
-  if (zoomOutBtn) zoomOutBtn.disabled = !hasControls;
-  if (zoomSlider) zoomSlider.disabled = !hasControls;
-}
-
-async function applyZoom(nextZoom) {
-  const track = getTrack();
-  if (!track || !zoomSupported || !zoomSlider) return;
-
-  const min = Number(zoomSlider.min);
-  const max = Number(zoomSlider.max);
-  const clamped = Math.min(max, Math.max(min, nextZoom));
-
-  try {
-    await track.applyConstraints({ advanced: [{ zoom: clamped }] });
-    zoomSlider.value = String(clamped);
-    updateZoomLabel(clamped);
-  } catch (error) {
-    console.warn("Gagal set zoom:", error);
-  }
-}
-
-async function setupZoomControls() {
-  const track = getTrack();
-  if (!track || !zoomSlider) return;
-
-  const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-  const settings = track.getSettings ? track.getSettings() : {};
-
-  if (!capabilities.zoom) {
-    zoomSupported = false;
-    updateZoomLabel(1);
-    setZoomControlsEnabled(false);
-    return;
-  }
-
-  zoomSupported = true;
-  zoomSlider.min = String(capabilities.zoom.min ?? 1);
-  zoomSlider.max = String(capabilities.zoom.max ?? 3);
-  zoomSlider.step = String(capabilities.zoom.step ?? 0.1);
-
-  const defaultZoom = settings.zoom ?? Number(zoomSlider.min);
-  zoomSlider.value = String(defaultZoom);
-  updateZoomLabel(defaultZoom);
-
-  setZoomControlsEnabled(true);
-}
-
-async function optimizeCameraForMiniQr() {
-  const track = getTrack();
-  if (!track || typeof track.getCapabilities !== "function") return;
-
-  const capabilities = track.getCapabilities();
-  const advanced = [];
-
-  if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes("continuous")) {
-    advanced.push({ focusMode: "continuous" });
-  }
-
-  if (capabilities.focusDistance && Number.isFinite(capabilities.focusDistance.min) && Number.isFinite(capabilities.focusDistance.max)) {
-    const min = capabilities.focusDistance.min;
-    const max = capabilities.focusDistance.max;
-    const nearFocus = min + (max - min) * 0.2;
-    advanced.push({ focusDistance: nearFocus });
-  }
-
-  if (Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes("continuous")) {
-    advanced.push({ exposureMode: "continuous" });
-  }
-
-  if (Array.isArray(capabilities.whiteBalanceMode) && capabilities.whiteBalanceMode.includes("continuous")) {
-    advanced.push({ whiteBalanceMode: "continuous" });
-  }
-
-  try {
-    await track.applyConstraints({
-      width: { ideal: 1920 },
-      height: { ideal: 1920 },
-      frameRate: { ideal: 30, max: 60 },
-      advanced,
-    });
-  } catch {
-    try {
-      await track.applyConstraints({
-        width: { ideal: 1280 },
-        height: { ideal: 1280 },
-      });
-    } catch {
-      // ignore if not supported
-    }
-  }
-}
-
-async function setupTorchButton() {
-  if (!torchBtn || !qrScanner) return;
-  try {
-    const hasFlash = await qrScanner.hasFlash();
-    torchBtn.disabled = !hasFlash;
-  } catch {
-    torchBtn.disabled = true;
-  }
+  zoomLabel.textContent = `${Math.round((Number(value) || 1) * 100)}%`;
 }
 
 async function logScannedUrl(value) {
@@ -171,13 +65,10 @@ async function logScannedUrl(value) {
     await fetch("/api/qr/log", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: value,
-        timestamp: new Date().toISOString(),
-      }),
+      body: JSON.stringify({ url: value, timestamp: new Date().toISOString() }),
     });
-  } catch (error) {
-    console.warn("Gagal kirim log QR:", error);
+  } catch {
+    // non-blocking
   }
 }
 
@@ -185,97 +76,133 @@ async function fetchQrInfo(value) {
   try {
     const response = await fetch(`/api/qr/validate?url=${encodeURIComponent(value)}`);
     const data = await response.json();
-
-    if (data.success) {
-      return `${data.title} — ${data.description}`;
-    }
+    if (data.success) return `${data.title} — ${data.description}`;
   } catch {
-    // Silent fallback
+    // fallback
   }
   return "QR terdeteksi.";
 }
 
-function onDecodeError(error) {
-  if (!error) return;
-  const text = String(error);
-  if (text.includes("No QR code found")) return;
-  console.debug("Decode issue:", error);
-}
-
-async function handleDecode(result) {
-  const raw = typeof result === "string" ? result : result?.data;
-  if (!raw) return;
-
+async function onDecode(text) {
+  if (!text) return;
   const now = Date.now();
-  if (raw === lastScannedValue && now - lastScanAt < 1800) return;
+  if (text === lastScannedValue && now - lastScanAt < 1800) return;
 
-  lastScannedValue = raw;
+  lastScannedValue = text;
   lastScanAt = now;
 
-  const meta = await fetchQrInfo(raw);
-  showResult(raw, meta);
+  const meta = await fetchQrInfo(text);
+  showResult(text, meta);
   setStatus("QR berhasil terbaca. Anda bisa scan lagi atau buka hasil.");
-
-  await logScannedUrl(raw);
+  await logScannedUrl(text);
 }
 
-async function createScanner() {
-  if (!window.QrScanner) {
-    throw new Error("Library QR scanner tidak ditemukan.");
+async function setupCamera() {
+  if (!window.Html5Qrcode) throw new Error("html5-qrcode tidak tersedia.");
+
+  if (!scanner) {
+    scanner = new Html5Qrcode("qrVideo", { formatsToSupport: [0] });
   }
 
-  if (qrScanner) return;
+  const cameras = await Html5Qrcode.getCameras();
+  if (!cameras || !cameras.length) throw new Error("Kamera tidak ditemukan.");
+  cameraId = cameras.find((cam) => /back|rear|environment/i.test(cam.label))?.id || cameras[0].id;
+}
 
-  qrScanner = new QrScanner(
-    videoEl,
-    handleDecode,
-    {
-      preferredCamera: "environment",
-      maxScansPerSecond: 25,
-      highlightScanRegion: true,
-      highlightCodeOutline: true,
-      returnDetailedScanResult: true,
-      calculateScanRegion: (video) => {
-        const smaller = Math.min(video.videoWidth, video.videoHeight);
-        const scanSize = Math.floor(smaller * 0.68);
-        return {
-          x: Math.floor((video.videoWidth - scanSize) / 2),
-          y: Math.floor((video.videoHeight - scanSize) / 2),
-          width: scanSize,
-          height: scanSize,
-          downScaledWidth: 1400,
-          downScaledHeight: 1400,
-        };
-      },
-    },
-    onDecodeError,
-  );
+async function setupZoomAndTorchCapabilities() {
+  zoomSupported = false;
+  torchEnabled = false;
+  setZoomControlsEnabled(false);
+  if (torchBtn) torchBtn.disabled = true;
 
-  if (typeof qrScanner.setInversionMode === "function") {
-    qrScanner.setInversionMode("both");
+  try {
+    const capabilities = scanner.getRunningTrackCapabilities?.() || {};
+
+    if (capabilities.zoom && zoomSlider) {
+      zoomSupported = true;
+      zoomSlider.min = String(capabilities.zoom.min ?? 1);
+      zoomSlider.max = String(capabilities.zoom.max ?? 3);
+      zoomSlider.step = String(capabilities.zoom.step ?? 0.1);
+      const initial = capabilities.zoom.min ?? 1;
+      zoomSlider.value = String(initial);
+      updateZoomLabel(initial);
+      setZoomControlsEnabled(true);
+    } else {
+      updateZoomLabel(1);
+    }
+
+    if (capabilities.torch && torchBtn) {
+      torchBtn.disabled = false;
+    }
+  } catch {
+    // ignore capabilities errors
   }
+}
 
-  if (typeof QrScanner.setGrayscaleWeights === "function") {
-    QrScanner.setGrayscaleWeights(77, 150, 29, true);
+async function applyZoom(nextZoom) {
+  if (!scannerRunning || !zoomSupported || !zoomSlider) return;
+  const min = Number(zoomSlider.min);
+  const max = Number(zoomSlider.max);
+  const value = Math.max(min, Math.min(max, Number(nextZoom)));
+
+  try {
+    await scanner.applyVideoConstraints({ advanced: [{ zoom: value }] });
+    zoomSlider.value = String(value);
+    updateZoomLabel(value);
+  } catch {
+    // ignore
+  }
+}
+
+async function toggleTorch() {
+  if (!scannerRunning || !torchBtn || torchBtn.disabled) return;
+
+  try {
+    torchEnabled = !torchEnabled;
+    await scanner.applyVideoConstraints({ advanced: [{ torch: torchEnabled }] });
+    torchBtn.textContent = torchEnabled ? "Senter Off" : "Senter";
+  } catch {
+    torchEnabled = false;
+    torchBtn.textContent = "Senter";
+    setStatus("Senter tidak didukung di perangkat ini.");
   }
 }
 
 async function startScanner() {
   try {
-    await createScanner();
     resetResult();
     setStatus("Meminta izin kamera...");
 
-    await qrScanner.start();
-    isScanning = true;
+    await setupCamera();
 
+    await scanner.start(
+      {
+        deviceId: { exact: cameraId },
+        facingMode: "environment",
+        width: { ideal: 1920 },
+        height: { ideal: 1920 },
+        frameRate: { ideal: 30, max: 60 },
+      },
+      {
+        fps: 20,
+        qrbox: (vw, vh) => {
+          const side = Math.floor(Math.min(vw, vh) * 0.62);
+          return { width: side, height: side };
+        },
+        aspectRatio: 1,
+        disableFlip: false,
+      },
+      onDecode,
+      () => {
+        // ignore decode miss
+      },
+    );
+
+    scannerRunning = true;
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
-    await optimizeCameraForMiniQr();
-    await setupZoomControls();
-    await setupTorchButton();
-
+    await setupZoomAndTorchCapabilities();
     setStatus("Scanner aktif (tanpa auto zoom). Dekatkan QR mini 8-12 cm dan tahan stabil.");
   } catch (error) {
     console.error(error);
@@ -284,13 +211,13 @@ async function startScanner() {
 }
 
 async function stopScanner() {
-  if (qrScanner && isScanning) {
-    await qrScanner.stop();
+  if (scanner && scannerRunning) {
+    await scanner.stop();
+    await scanner.clear();
   }
 
-  isScanning = false;
+  scannerRunning = false;
   torchEnabled = false;
-
   startBtn.disabled = false;
   stopBtn.disabled = true;
   if (torchBtn) {
@@ -298,7 +225,6 @@ async function stopScanner() {
     torchBtn.disabled = true;
   }
   setZoomControlsEnabled(false);
-
   setStatus("Scanner dihentikan.");
 }
 
@@ -306,37 +232,16 @@ function bindUi() {
   const backBtn = document.getElementById("backBtn");
 
   backBtn?.addEventListener("click", () => {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      window.location.href = "/";
-    }
+    if (window.history.length > 1) window.history.back();
+    else window.location.href = "/";
   });
 
   startBtn?.addEventListener("click", startScanner);
   stopBtn?.addEventListener("click", stopScanner);
-
-  torchBtn?.addEventListener("click", async () => {
-    if (!qrScanner || !isScanning || torchBtn.disabled) return;
-
-    try {
-      torchEnabled = !torchEnabled;
-      if (torchEnabled) {
-        await qrScanner.turnFlashOn();
-        torchBtn.textContent = "Senter Off";
-      } else {
-        await qrScanner.turnFlashOff();
-        torchBtn.textContent = "Senter";
-      }
-    } catch (error) {
-      torchEnabled = false;
-      torchBtn.textContent = "Senter";
-      console.warn("Senter tidak didukung:", error);
-    }
-  });
+  torchBtn?.addEventListener("click", toggleTorch);
 
   zoomSlider?.addEventListener("input", async (event) => {
-    await applyZoom(Number(event.target.value));
+    await applyZoom(event.target.value);
   });
 
   zoomInBtn?.addEventListener("click", async () => {
@@ -352,7 +257,6 @@ function bindUi() {
   copyBtn?.addEventListener("click", async () => {
     const value = resultTextEl?.textContent?.trim();
     if (!value) return;
-
     try {
       await navigator.clipboard.writeText(value);
       setStatus("Isi QR berhasil disalin.");
@@ -367,22 +271,15 @@ function bindUi() {
       setStatus("Hasil scan bukan URL yang valid.");
       return;
     }
-
     window.open(value, "_blank", "noopener,noreferrer");
   });
 
   document.addEventListener("visibilitychange", async () => {
-    if (document.hidden && isScanning) {
-      await stopScanner();
-    }
+    if (document.hidden && scannerRunning) await stopScanner();
   });
 
   window.addEventListener("beforeunload", async () => {
-    if (qrScanner) {
-      await qrScanner.stop();
-      qrScanner.destroy();
-      qrScanner = null;
-    }
+    if (scannerRunning) await stopScanner();
   });
 }
 
