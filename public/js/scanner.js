@@ -3,7 +3,6 @@ let qrScanner = null;
 let isScanning = false;
 let torchEnabled = false;
 let zoomSupported = false;
-let autoZoomTimer = null;
 let lastScanAt = 0;
 let lastScannedValue = "";
 
@@ -112,33 +111,49 @@ async function setupZoomControls() {
   setZoomControlsEnabled(true);
 }
 
-function startAutoZoomAssist() {
-  if (!zoomSupported || autoZoomTimer) return;
+async function optimizeCameraForMiniQr() {
+  const track = getTrack();
+  if (!track || typeof track.getCapabilities !== "function") return;
 
-  const levels = [0.15, 0.3, 0.45, 0.6, 0.78, 0.9];
-  let levelIndex = 0;
+  const capabilities = track.getCapabilities();
+  const advanced = [];
 
-  autoZoomTimer = window.setInterval(async () => {
-    if (!isScanning || !zoomSlider) return;
+  if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes("continuous")) {
+    advanced.push({ focusMode: "continuous" });
+  }
 
-    const now = Date.now();
-    const isRecentlyDetected = now - lastScanAt < 3000;
-    if (isRecentlyDetected) return;
+  if (capabilities.focusDistance && Number.isFinite(capabilities.focusDistance.min) && Number.isFinite(capabilities.focusDistance.max)) {
+    const min = capabilities.focusDistance.min;
+    const max = capabilities.focusDistance.max;
+    const nearFocus = min + (max - min) * 0.2;
+    advanced.push({ focusDistance: nearFocus });
+  }
 
-    const min = Number(zoomSlider.min);
-    const max = Number(zoomSlider.max);
-    const ratio = levels[levelIndex % levels.length];
-    const targetZoom = min + (max - min) * ratio;
+  if (Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes("continuous")) {
+    advanced.push({ exposureMode: "continuous" });
+  }
 
-    await applyZoom(targetZoom);
-    levelIndex += 1;
-  }, 1300);
-}
+  if (Array.isArray(capabilities.whiteBalanceMode) && capabilities.whiteBalanceMode.includes("continuous")) {
+    advanced.push({ whiteBalanceMode: "continuous" });
+  }
 
-function stopAutoZoomAssist() {
-  if (!autoZoomTimer) return;
-  window.clearInterval(autoZoomTimer);
-  autoZoomTimer = null;
+  try {
+    await track.applyConstraints({
+      width: { ideal: 1920 },
+      height: { ideal: 1920 },
+      frameRate: { ideal: 30, max: 60 },
+      advanced,
+    });
+  } catch {
+    try {
+      await track.applyConstraints({
+        width: { ideal: 1280 },
+        height: { ideal: 1280 },
+      });
+    } catch {
+      // ignore if not supported
+    }
+  }
 }
 
 async function setupTorchButton() {
@@ -222,14 +237,14 @@ async function createScanner() {
       returnDetailedScanResult: true,
       calculateScanRegion: (video) => {
         const smaller = Math.min(video.videoWidth, video.videoHeight);
-        const scanSize = Math.floor(smaller * 0.92);
+        const scanSize = Math.floor(smaller * 0.68);
         return {
           x: Math.floor((video.videoWidth - scanSize) / 2),
           y: Math.floor((video.videoHeight - scanSize) / 2),
           width: scanSize,
           height: scanSize,
-          downScaledWidth: 1200,
-          downScaledHeight: 1200,
+          downScaledWidth: 1400,
+          downScaledHeight: 1400,
         };
       },
     },
@@ -257,11 +272,11 @@ async function startScanner() {
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
+    await optimizeCameraForMiniQr();
     await setupZoomControls();
     await setupTorchButton();
-    startAutoZoomAssist();
 
-    setStatus("Scanner aktif. Arahkan kamera ke QR mini pada kotak panduan.");
+    setStatus("Scanner aktif (tanpa auto zoom). Dekatkan QR mini 8-12 cm dan tahan stabil.");
   } catch (error) {
     console.error(error);
     setStatus("Gagal memulai scanner. Pastikan izin kamera aktif.");
@@ -269,8 +284,6 @@ async function startScanner() {
 }
 
 async function stopScanner() {
-  stopAutoZoomAssist();
-
   if (qrScanner && isScanning) {
     await qrScanner.stop();
   }
@@ -366,7 +379,6 @@ function bindUi() {
 
   window.addEventListener("beforeunload", async () => {
     if (qrScanner) {
-      stopAutoZoomAssist();
       await qrScanner.stop();
       qrScanner.destroy();
       qrScanner = null;
