@@ -16,6 +16,8 @@ let fallbackFrameBusy = false;
 let autoCameraCycleIntervalId = null;
 let autoCameraCycleStartTimeoutId = null;
 let autoCameraSwitchInProgress = false;
+let scanSessionStartedAt = 0;
+let lastGuideUpdateAt = 0;
 const MAX_SAFE_ZOOM_FRACTION = 0.35;
 const CARD_SCAN_QRBLOCK_MOBILE = { width: 170, height: 170 };
 const CARD_SCAN_QRBLOCK_DESKTOP = { width: 220, height: 220 };
@@ -102,6 +104,132 @@ function isScannerRunning() {
   } catch {
     return false;
   }
+}
+
+function getActiveVideoElement() {
+  const readerEl = document.getElementById("reader");
+  if (!readerEl) return null;
+
+  if (usingAlternativeScanner) {
+    const altVideo = document.getElementById("altQrVideo");
+    if (altVideo) return altVideo;
+  }
+
+  return readerEl.querySelector("video");
+}
+
+function setScanGuideMessage(message, tone = "warning") {
+  const guideEl = document.getElementById("scanGuide");
+  if (!guideEl) return;
+
+  const toneClass = tone === "danger" ? "text-danger" : tone === "success" ? "text-success" : "text-warning";
+  guideEl.className = `mt-2 small text-center ${toneClass}`;
+  guideEl.textContent = message || "";
+}
+
+function showMiniQrGuideIntro() {
+  setScanGuideMessage("Mode QR kecil aktif: jaga kontras tinggi (hitam-putih), sisakan pinggir putih (quiet zone), dan coba jarak dekat-lalu-jauh perlahan.", "warning");
+}
+
+function estimateFrameQuality(imageData) {
+  const src = imageData?.data;
+  if (!src || src.length < 4) {
+    return {
+      brightness: 128,
+      contrast: 0,
+      sharpness: 0,
+    };
+  }
+
+  let sum = 0;
+  let sumSq = 0;
+  let edgeEnergy = 0;
+  let count = 0;
+
+  const w = imageData.width;
+  const h = imageData.height;
+  const gray = new Uint8Array(w * h);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const g = Math.round(0.299 * src[idx] + 0.587 * src[idx + 1] + 0.114 * src[idx + 2]);
+      gray[y * w + x] = g;
+      sum += g;
+      sumSq += g * g;
+      count += 1;
+    }
+  }
+
+  const mean = count ? sum / count : 128;
+  const variance = count ? Math.max(0, sumSq / count - mean * mean) : 0;
+  const contrast = Math.sqrt(variance);
+
+  for (let y = 0; y < h - 1; y++) {
+    for (let x = 0; x < w - 1; x++) {
+      const i = y * w + x;
+      edgeEnergy += Math.abs(gray[i] - gray[i + 1]);
+      edgeEnergy += Math.abs(gray[i] - gray[i + w]);
+    }
+  }
+
+  const sharpness = edgeEnergy / Math.max(1, (w - 1) * (h - 1) * 2);
+
+  return {
+    brightness: mean,
+    contrast,
+    sharpness,
+  };
+}
+
+function updateMiniQrGuideFromFrame(srcCanvas, vw, vh) {
+  const now = Date.now();
+  if (now - lastGuideUpdateAt < 1200) return;
+  lastGuideUpdateAt = now;
+
+  const analysisCanvas = document.createElement("canvas");
+  analysisCanvas.width = 160;
+  analysisCanvas.height = 160;
+  const actx = analysisCanvas.getContext("2d", { willReadFrequently: true });
+  if (!actx) return;
+
+  // Fokus analisa di area tengah tempat user biasanya menaruh QR.
+  const aw = Math.floor(vw * 0.55);
+  const ah = Math.floor(vh * 0.55);
+  const sx = Math.floor((vw - aw) / 2);
+  const sy = Math.floor((vh - ah) / 2);
+  actx.drawImage(srcCanvas, sx, sy, aw, ah, 0, 0, analysisCanvas.width, analysisCanvas.height);
+
+  const frame = actx.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
+  const q = estimateFrameQuality(frame);
+  const elapsed = scanSessionStartedAt ? Math.floor((now - scanSessionStartedAt) / 1000) : 0;
+
+  if (q.brightness < 65) {
+    setScanGuideMessage("Terlalu gelap. Tambah cahaya langsung ke kartu agar modul QR kecil lebih terbaca.", "warning");
+    return;
+  }
+
+  if (q.brightness > 205) {
+    setScanGuideMessage("Terlalu terang / silau. Miringkan kartu sedikit untuk menghindari pantulan.", "warning");
+    return;
+  }
+
+  if (q.contrast < 22) {
+    setScanGuideMessage("Kontras rendah. Pastikan QR hitam-putih jelas dan tidak tertutup glare/refleksi.", "warning");
+    return;
+  }
+
+  if (q.sharpness < 14) {
+    setScanGuideMessage("Masih blur. Tahan tangan 1 detik, lalu ubah jarak 2-3 cm (dekat lalu sedikit menjauh).", "warning");
+    return;
+  }
+
+  if (elapsed > 10) {
+    setScanGuideMessage("Belum terbaca: pastikan ada pinggir putih (quiet zone) di sekitar QR dan isi sekitar 35-45% area frame.", "warning");
+    return;
+  }
+
+  setScanGuideMessage("Kualitas frame sudah cukup. Coba kunci posisi kartu di tengah selama 1-2 detik.", "success");
 }
 
 function setZoomControlsEnabled(enabled) {
@@ -228,8 +356,11 @@ async function initializeAlternativeScanner() {
     );
     usingAlternativeScanner = true;
     alternativeScannerStarted = true;
+    scanSessionStartedAt = Date.now();
+    showMiniQrGuideIntro();
     setZoomControlsEnabled(false);
     setupAlternativeCameraEnhancements(altVideo);
+    startRealtimeJsQrFallback();
     return true;
   } catch (err) {
     console.error("Alternative scanner gagal dijalankan:", err);
@@ -489,6 +620,49 @@ function toBinaryImageData(imageData, threshold) {
   return out;
 }
 
+function estimateGrayMean(imageData) {
+  const src = imageData?.data;
+  if (!src || src.length === 0) return 128;
+
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < src.length; i += 4) {
+    sum += src[i];
+    count += 1;
+  }
+  if (count === 0) return 128;
+  return Math.max(0, Math.min(255, Math.round(sum / count)));
+}
+
+function sharpenImageData(imageData, amount = 0.85) {
+  const w = imageData.width;
+  const h = imageData.height;
+  const src = imageData.data;
+  const out = new ImageData(w, h);
+  const dst = out.data;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const c = src[i];
+      const l = src[(y * w + Math.max(0, x - 1)) * 4];
+      const r = src[(y * w + Math.min(w - 1, x + 1)) * 4];
+      const t = src[(Math.max(0, y - 1) * w + x) * 4];
+      const b = src[(Math.min(h - 1, y + 1) * w + x) * 4];
+
+      const edge = c * 5 - l - r - t - b;
+      const val = Math.max(0, Math.min(255, Math.round(c * (1 - amount) + edge * amount)));
+
+      dst[i] = val;
+      dst[i + 1] = val;
+      dst[i + 2] = val;
+      dst[i + 3] = 255;
+    }
+  }
+
+  return out;
+}
+
 function decodeQrFromImageData(imageData) {
   if (typeof jsQR === "undefined" || !imageData) return null;
 
@@ -504,13 +678,27 @@ function decodeQrFromImageData(imageData) {
     });
     if (grayDecoded) return grayDecoded;
 
-    const thresholds = [90, 110, 130, 150, 170];
+    const sharpened = sharpenImageData(gray, 0.9);
+    const sharpDecoded = jsQR(sharpened.data, sharpened.width, sharpened.height, {
+      inversionAttempts: "attemptBoth",
+    });
+    if (sharpDecoded) return sharpDecoded;
+
+    const mean = estimateGrayMean(gray);
+    const thresholds = [70, 90, 110, 130, 150, 170, mean - 25, mean, mean + 25].map((v) => Math.max(35, Math.min(220, Math.round(v)))).filter((v, idx, arr) => arr.indexOf(v) === idx);
+
     for (const t of thresholds) {
       const bw = toBinaryImageData(gray, t);
       const bwDecoded = jsQR(bw.data, bw.width, bw.height, {
         inversionAttempts: "attemptBoth",
       });
       if (bwDecoded) return bwDecoded;
+
+      const bwSharp = toBinaryImageData(sharpened, t);
+      const bwSharpDecoded = jsQR(bwSharp.data, bwSharp.width, bwSharp.height, {
+        inversionAttempts: "attemptBoth",
+      });
+      if (bwSharpDecoded) return bwSharpDecoded;
     }
 
     return null;
@@ -618,13 +806,11 @@ function startAutoCameraCycleFallback() {
 }
 
 function tryRealtimeJsQrFallbackOnce() {
-  if (usingAlternativeScanner) return;
   if (fallbackFrameBusy || scannedResult || !isScannerRunning()) return;
   fallbackFrameBusy = true;
 
   try {
-    const readerEl = document.getElementById("reader");
-    const videoEl = readerEl ? readerEl.querySelector("video") : null;
+    const videoEl = getActiveVideoElement();
     if (!videoEl || videoEl.readyState < 2) return;
 
     const vw = videoEl.videoWidth || 0;
@@ -638,13 +824,14 @@ function tryRealtimeJsQrFallbackOnce() {
     if (!srcCtx) return;
 
     srcCtx.drawImage(videoEl, 0, 0, vw, vh);
+    updateMiniQrGuideFromFrame(srcCanvas, vw, vh);
 
     // 1) Coba full-frame dulu.
     let code = decodeQrFromImageData(srcCtx.getImageData(0, 0, vw, vh));
 
-    // 2) Kalau belum dapat, coba beberapa crop tengah dan upscale.
+    // 2) Kalau belum dapat, coba beberapa crop tengah dan upscale lebih tinggi.
     if (!code) {
-      const cropScales = [0.65, 0.52, 0.42, 0.34, 0.28, 0.22];
+      const cropScales = [0.78, 0.65, 0.52, 0.42, 0.34, 0.28, 0.22, 0.18];
       for (const scale of cropScales) {
         const cw = Math.floor(vw * scale);
         const ch = Math.floor(vh * scale);
@@ -652,8 +839,8 @@ function tryRealtimeJsQrFallbackOnce() {
         const sy = Math.floor((vh - ch) / 2);
 
         const upscaleCanvas = document.createElement("canvas");
-        upscaleCanvas.width = 900;
-        upscaleCanvas.height = 900;
+        upscaleCanvas.width = 1200;
+        upscaleCanvas.height = 1200;
         const upscaleCtx = upscaleCanvas.getContext("2d", { willReadFrequently: true });
         if (!upscaleCtx) continue;
 
@@ -661,6 +848,40 @@ function tryRealtimeJsQrFallbackOnce() {
         upscaleCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, upscaleCanvas.width, upscaleCanvas.height);
 
         code = decodeQrFromImageData(upscaleCtx.getImageData(0, 0, upscaleCanvas.width, upscaleCanvas.height));
+        if (code) break;
+      }
+    }
+
+    // 3) Kalau masih gagal, coba beberapa titik crop (untuk QR kecil yang tidak tepat di tengah frame).
+    if (!code) {
+      const regions = [
+        { x: 0.18, y: 0.18 },
+        { x: 0.5, y: 0.18 },
+        { x: 0.82, y: 0.18 },
+        { x: 0.18, y: 0.5 },
+        { x: 0.5, y: 0.5 },
+        { x: 0.82, y: 0.5 },
+        { x: 0.18, y: 0.82 },
+        { x: 0.5, y: 0.82 },
+        { x: 0.82, y: 0.82 },
+      ];
+
+      for (const region of regions) {
+        const cw = Math.floor(vw * 0.3);
+        const ch = Math.floor(vh * 0.3);
+        const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * region.x - cw / 2)));
+        const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * region.y - ch / 2)));
+
+        const roiCanvas = document.createElement("canvas");
+        roiCanvas.width = 1000;
+        roiCanvas.height = 1000;
+        const roiCtx = roiCanvas.getContext("2d", { willReadFrequently: true });
+        if (!roiCtx) continue;
+
+        roiCtx.imageSmoothingEnabled = false;
+        roiCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, roiCanvas.width, roiCanvas.height);
+
+        code = decodeQrFromImageData(roiCtx.getImageData(0, 0, roiCanvas.width, roiCanvas.height));
         if (code) break;
       }
     }
@@ -675,16 +896,18 @@ function tryRealtimeJsQrFallbackOnce() {
 }
 
 function startRealtimeJsQrFallback() {
-  if (usingAlternativeScanner) return;
   if (typeof jsQR === "undefined") return;
   stopRealtimeJsQrFallback();
+  if (!scanSessionStartedAt) {
+    scanSessionStartedAt = Date.now();
+  }
 
   // Beri delay kecil sampai video kamera benar-benar siap.
   setTimeout(() => {
     if (scannedResult || !isScannerRunning()) return;
     realtimeFallbackIntervalId = setInterval(() => {
       tryRealtimeJsQrFallbackOnce();
-    }, 550);
+    }, 450);
   }, 1000);
 }
 
@@ -1015,6 +1238,8 @@ async function initializeScanner() {
     html5QrcodeScanner = new Html5QrcodeScanner("reader", scannerConfig, false);
 
     html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    scanSessionStartedAt = Date.now();
+    showMiniQrGuideIntro();
     setZoomControlsEnabled(true);
     startScannerUiBootstrap();
     setupPinchToZoom();
@@ -1065,6 +1290,7 @@ function onScanSuccess(decodedText, decodedResult) {
   document.getElementById("resultText").textContent = decodedText;
   renderPayloadInfo(decodedText);
   document.getElementById("statusMessage").innerHTML = '<div class="alert alert-success">✅ QR Code berhasil dibaca!</div>';
+  setScanGuideMessage("QR terdeteksi. Anda bisa lanjut buka link atau scan lagi.", "success");
 
   // Auto-redirect if URL from camera scan
   if (isValidHttpUrl(decodedText) && decodedResult) {
@@ -1110,6 +1336,9 @@ async function resetScanner() {
   if (payloadTypeEl) payloadTypeEl.textContent = "";
   if (payloadHintEl) payloadHintEl.textContent = "";
   scannedResult = null;
+  scanSessionStartedAt = Date.now();
+  lastGuideUpdateAt = 0;
+  showMiniQrGuideIntro();
 
   // Resume scanning
   if (usingAlternativeScanner && alternativeQrScanner) {
