@@ -113,12 +113,82 @@ class DinastyMiniQrScanner {
     });
   }
 
+  async pickBestRearCameraId() {
+    try {
+      const cameras = await QrScanner.listCameras(true);
+      if (!Array.isArray(cameras) || cameras.length === 0) return null;
+
+      const score = (labelRaw) => {
+        const label = (labelRaw || "").toLowerCase();
+        let s = 0;
+
+        if (/back|rear|environment|belakang/.test(label)) s += 100;
+        if (/main|utama|primary/.test(label)) s += 40;
+        if (/wide|ultra|macro|depth|tof|iris|front|selfie/.test(label)) s -= 60;
+
+        return s;
+      };
+
+      const sorted = [...cameras].sort((a, b) => score(b.label) - score(a.label));
+      return sorted[0]?.id || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async applyCameraQualityConstraints() {
+    const stream = this.video?.srcObject;
+    if (!(stream instanceof MediaStream)) return;
+
+    const track = stream.getVideoTracks?.()[0];
+    if (!track?.applyConstraints) return;
+
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    const advanced = [];
+
+    if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
+      advanced.push({ focusMode: "continuous" });
+    }
+
+    if (typeof caps.zoom?.max === "number") {
+      const min = caps.zoom.min ?? 1;
+      const max = caps.zoom.max ?? min;
+      const target = min + (max - min) * 0.3;
+      advanced.push({ zoom: target });
+    }
+
+    try {
+      await track.applyConstraints({
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        advanced,
+      });
+    } catch {
+      try {
+        await track.applyConstraints({
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          advanced,
+        });
+      } catch {
+        // abaikan jika perangkat membatasi constraints
+      }
+    }
+  }
+
   async start() {
     try {
       this.setStatus("Menyiapkan kamera...", "info");
 
       this.createScanner();
-      await this.qrScanner.start();
+      const bestRearCameraId = await this.pickBestRearCameraId();
+      if (bestRearCameraId) {
+        await this.qrScanner.start(bestRearCameraId);
+      } else {
+        await this.qrScanner.start();
+      }
+
+      await this.applyCameraQualityConstraints();
 
       this.setStatus("Scanner siap. Arahkan ke QR Code...", "success");
     } catch (err) {
