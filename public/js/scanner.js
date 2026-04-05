@@ -8,11 +8,12 @@ let lastScanAt = 0;
 let lastScannedValue = "";
 let aggressiveFallbackInterval = null;
 let aggressiveFallbackBusy = false;
+let hdScanBusy = false;
 let fallbackPhase = 0;
 let fallbackRegionCursor = 0;
 let miniAggressiveTick = 0;
 
-const FALLBACK_INTERVAL_MS = 900;
+const FALLBACK_INTERVAL_MS = 1300;
 const MINI_UPSCALE_SIZE = 1400;
 const MINI_DEEP_PASS_EVERY = 3;
 const MINI_CENTER_SCALES = [0.42, 0.34, 0.28, 0.22];
@@ -39,6 +40,7 @@ const zoomInBtn = document.getElementById("zoomInBtn");
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomSlider = document.getElementById("zoomSlider");
 const zoomLabel = document.getElementById("zoomLevelDisplay");
+const hdScanBtn = document.getElementById("hdScanBtn");
 const openBtn = document.getElementById("openResultBtn");
 const copyBtn = document.getElementById("copyResultBtn");
 
@@ -307,6 +309,8 @@ async function setupZoomAndTorchCapabilities() {
   } catch {
     if (torchBtn) torchBtn.disabled = true;
   }
+
+  if (hdScanBtn) hdScanBtn.disabled = !scannerRunning;
 }
 
 async function optimizeCameraForMiniQr() {
@@ -320,6 +324,10 @@ async function optimizeCameraForMiniQr() {
 
     if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
       advanced.push({ focusMode: "continuous" });
+    }
+
+    if (caps.focusDistance && Number.isFinite(caps.focusDistance.min)) {
+      advanced.push({ focusDistance: caps.focusDistance.min });
     }
 
     if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes("continuous")) {
@@ -396,6 +404,7 @@ async function startScanner() {
 
     scannerRunning = true;
     lastScanAt = Date.now();
+    hdScanBusy = false;
     fallbackPhase = 0;
     fallbackRegionCursor = 0;
     miniAggressiveTick = 0;
@@ -405,7 +414,7 @@ async function startScanner() {
     await setupZoomAndTorchCapabilities();
     await optimizeCameraForMiniQr();
     startAggressiveFallbackAssist();
-    setStatus("Mode agresif aktif. Posisikan QR mini di area kamera, jarak 6-10 cm, lalu tahan stabil.");
+    setStatus("Mode agresif aktif. Jika QR mini sulit terbaca, tekan tombol Scan HD (QR Mini).");
   } catch (error) {
     console.error(error);
     setStatus("Gagal memulai scanner. Pastikan izin kamera aktif.");
@@ -431,8 +440,10 @@ async function stopScanner() {
 
     scannerRunning = false;
     torchEnabled = false;
+    hdScanBusy = false;
     if (startBtn) startBtn.disabled = false;
     if (stopBtn) stopBtn.disabled = true;
+    if (hdScanBtn) hdScanBtn.disabled = true;
     if (torchBtn) {
       torchBtn.textContent = "Senter";
       torchBtn.disabled = true;
@@ -441,6 +452,100 @@ async function stopScanner() {
     setStatus("Scanner dihentikan.");
   } finally {
     scannerTransitioning = false;
+  }
+}
+
+async function scanMiniQrViaHdSnapshot() {
+  if (!scannerRunning || !scanner || hdScanBusy) return;
+  const video = document.getElementById("qrVideo");
+  if (!video || !video.videoWidth || !video.videoHeight) return;
+
+  hdScanBusy = true;
+  if (hdScanBtn) hdScanBtn.disabled = true;
+  setStatus("Memproses snapshot HD untuk QR mini...");
+
+  try {
+    const qrEngine = scanner._qrEnginePromise;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    const src = document.createElement("canvas");
+    src.width = vw;
+    src.height = vh;
+    const srcCtx = src.getContext("2d", { willReadFrequently: true });
+    if (!srcCtx) return;
+    srcCtx.imageSmoothingEnabled = false;
+    srcCtx.drawImage(video, 0, 0, vw, vh);
+
+    const tryScan = async (target) => {
+      try {
+        const res = await QrScanner.scanImage(target, {
+          qrEngine,
+          returnDetailedScanResult: true,
+          alsoTryWithoutScanRegion: true,
+        });
+        return res?.data ? res : null;
+      } catch {
+        return null;
+      }
+    };
+
+    let hit = await tryScan(src);
+
+    const up = document.createElement("canvas");
+    up.width = 2200;
+    up.height = 2200;
+    const upCtx = up.getContext("2d", { willReadFrequently: true });
+    if (!upCtx) return;
+    upCtx.imageSmoothingEnabled = false;
+
+    if (!hit) {
+      for (const scale of [0.72, 0.56, 0.42, 0.32, 0.24, 0.18]) {
+        const cw = Math.floor(vw * scale);
+        const ch = Math.floor(vh * scale);
+        const sx = Math.floor((vw - cw) / 2);
+        const sy = Math.floor((vh - ch) / 2);
+        upCtx.clearRect(0, 0, up.width, up.height);
+        upCtx.drawImage(src, sx, sy, cw, ch, 0, 0, up.width, up.height);
+        hit = await tryScan(up);
+        if (hit) break;
+      }
+    }
+
+    if (!hit) {
+      const grid = [
+        [0.2, 0.2],
+        [0.5, 0.2],
+        [0.8, 0.2],
+        [0.2, 0.5],
+        [0.5, 0.5],
+        [0.8, 0.5],
+        [0.2, 0.8],
+        [0.5, 0.8],
+        [0.8, 0.8],
+      ];
+
+      const cw = Math.floor(vw * 0.24);
+      const ch = Math.floor(vh * 0.24);
+      for (const [cx, cy] of grid) {
+        const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * cx - cw / 2)));
+        const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * cy - ch / 2)));
+        upCtx.clearRect(0, 0, up.width, up.height);
+        upCtx.drawImage(src, sx, sy, cw, ch, 0, 0, up.width, up.height);
+        hit = await tryScan(up);
+        if (hit) break;
+      }
+    }
+
+    if (hit?.data) {
+      await onDecode(hit);
+      setStatus("QR mini terbaca via snapshot HD.");
+    } else {
+      setStatus("Belum terbaca. Coba jarak 7-12 cm, lalu tekan Scan HD lagi.");
+    }
+  } finally {
+    hdScanBusy = false;
+    if (hdScanBtn) hdScanBtn.disabled = !scannerRunning;
   }
 }
 
@@ -455,6 +560,7 @@ function bindUi() {
   startBtn?.addEventListener("click", startScanner);
   stopBtn?.addEventListener("click", stopScanner);
   torchBtn?.addEventListener("click", toggleTorch);
+  hdScanBtn?.addEventListener("click", scanMiniQrViaHdSnapshot);
 
   zoomSlider?.addEventListener("input", async (event) => {
     await applyZoom(event.target.value);
