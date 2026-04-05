@@ -148,23 +148,31 @@ function getAggressiveScanRegions(video) {
   if (!width || !height) return [];
 
   const minSide = Math.min(width, height);
-  const baseSize = Math.max(180, Math.floor(minSide * 0.36));
-  const innerSize = Math.max(140, Math.floor(minSide * 0.26));
-  const tightSize = Math.max(120, Math.floor(minSide * 0.18));
+  const baseSize = Math.max(220, Math.floor(minSide * 0.56));
+  const innerSize = Math.max(180, Math.floor(minSide * 0.42));
+  const tightSize = Math.max(140, Math.floor(minSide * 0.28));
+  const microSize = Math.max(110, Math.floor(minSide * 0.18));
 
   const centers = [
     [0.5, 0.5],
+    [0.25, 0.25],
     [0.5, 0.35],
+    [0.75, 0.25],
     [0.5, 0.65],
+    [0.25, 0.5],
     [0.35, 0.5],
     [0.65, 0.5],
     [0.3, 0.3],
     [0.7, 0.3],
+    [0.5, 0.25],
+    [0.5, 0.75],
     [0.3, 0.7],
     [0.7, 0.7],
+    [0.25, 0.75],
+    [0.75, 0.75],
   ];
 
-  const sizes = [baseSize, innerSize, tightSize];
+  const sizes = [baseSize, innerSize, tightSize, microSize];
   const regions = [];
 
   for (const size of sizes) {
@@ -174,8 +182,8 @@ function getAggressiveScanRegions(video) {
         y: Math.max(0, Math.round(height * cy - size / 2)),
         width: Math.min(size, width),
         height: Math.min(size, height),
-        downScaledWidth: 1800,
-        downScaledHeight: 1800,
+        downScaledWidth: 2400,
+        downScaledHeight: 2400,
       });
     }
   }
@@ -226,9 +234,9 @@ function startAggressiveFallbackAssist() {
   aggressiveFallbackInterval = setInterval(async () => {
     if (!scannerRunning) return;
     const idleMs = Date.now() - lastScanAt;
-    if (idleMs < 900) return;
+    if (idleMs < 650) return;
     await runAggressiveMiniFallbackScan();
-  }, 900);
+  }, 700);
 }
 
 async function setupCamera() {
@@ -247,14 +255,14 @@ async function setupCamera() {
         returnDetailedScanResult: true,
         calculateScanRegion: (video) => {
           const smaller = Math.min(video.videoWidth, video.videoHeight);
-          const scanSize = Math.floor(smaller * 0.45);
+          const scanSize = Math.floor(smaller * 0.82);
           return {
             x: Math.floor((video.videoWidth - scanSize) / 2),
             y: Math.floor((video.videoHeight - scanSize) / 2),
             width: scanSize,
             height: scanSize,
-            downScaledWidth: 1700,
-            downScaledHeight: 1700,
+            downScaledWidth: 2200,
+            downScaledHeight: 2200,
           };
         },
       },
@@ -334,7 +342,7 @@ async function optimizeCameraForMiniQr() {
     }
 
     if (caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max)) {
-      const suggestedZoom = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.7;
+      const suggestedZoom = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.85;
       advanced.push({ zoom: suggestedZoom });
       if (zoomSlider) {
         zoomSlider.value = String(suggestedZoom);
@@ -415,7 +423,7 @@ async function startScanner() {
     await optimizeCameraForMiniQr();
     startAutoZoomAssist();
     startAggressiveFallbackAssist();
-    setStatus("Scanner aktif. Posisikan QR mini di area kotak, jarak 8-12 cm, lalu tahan stabil 1-2 detik.");
+    setStatus("Mode agresif aktif. Posisikan QR mini di area kamera, jarak 6-10 cm, lalu tahan stabil.");
   } catch (error) {
     console.error(error);
     setStatus("Gagal memulai scanner. Pastikan izin kamera aktif.");

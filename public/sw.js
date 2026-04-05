@@ -38,9 +38,13 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_VERSION).map((oldKey) => caches.delete(oldKey)))));
-
-  self.clients.claim();
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key !== CACHE_VERSION).map((oldKey) => caches.delete(oldKey)));
+      await self.clients.claim();
+    })(),
+  );
 });
 
 async function networkFirst(request) {
