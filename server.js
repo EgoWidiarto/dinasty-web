@@ -42,7 +42,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/vendor", express.static(path.join(__dirname, "node_modules")));
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/sw.js", (req, res) => {
