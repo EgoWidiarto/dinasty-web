@@ -6,7 +6,6 @@ let torchEnabled = false;
 let zoomSupported = false;
 let lastScanAt = 0;
 let lastScannedValue = "";
-let autoZoomInterval = null;
 let aggressiveFallbackInterval = null;
 let aggressiveFallbackBusy = false;
 
@@ -108,38 +107,11 @@ async function onDecode(decoded) {
   await logScannedUrl(text);
 }
 
-function stopAutoZoomAssist() {
-  if (autoZoomInterval) {
-    clearInterval(autoZoomInterval);
-    autoZoomInterval = null;
-  }
-}
-
 function stopAggressiveFallbackAssist() {
   if (aggressiveFallbackInterval) {
     clearInterval(aggressiveFallbackInterval);
     aggressiveFallbackInterval = null;
   }
-}
-
-function startAutoZoomAssist() {
-  stopAutoZoomAssist();
-  if (!scannerRunning || !zoomSupported || !zoomSlider) return;
-
-  autoZoomInterval = setInterval(async () => {
-    if (!scannerRunning || !zoomSupported || !zoomSlider) return;
-    const idleMs = Date.now() - lastScanAt;
-    if (idleMs < 1800) return;
-
-    const step = Number(zoomSlider.step || 0.1);
-    const current = Number(zoomSlider.value || 1);
-    const max = Number(zoomSlider.max || current);
-    const next = Math.min(max, current + step * 1.5);
-
-    if (next > current + 0.0001) {
-      await applyZoom(next);
-    }
-  }, 1200);
 }
 
 function getAggressiveScanRegions(video) {
@@ -421,7 +393,6 @@ async function startScanner() {
 
     await setupZoomAndTorchCapabilities();
     await optimizeCameraForMiniQr();
-    startAutoZoomAssist();
     startAggressiveFallbackAssist();
     setStatus("Mode agresif aktif. Posisikan QR mini di area kamera, jarak 6-10 cm, lalu tahan stabil.");
   } catch (error) {
@@ -445,7 +416,6 @@ async function stopScanner() {
       scanner = null;
     }
 
-    stopAutoZoomAssist();
     stopAggressiveFallbackAssist();
 
     scannerRunning = false;
