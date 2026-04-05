@@ -313,15 +313,6 @@ async function optimizeCameraForMiniQr() {
       advanced.push({ whiteBalanceMode: "continuous" });
     }
 
-    if (caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max)) {
-      const suggestedZoom = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.85;
-      advanced.push({ zoom: suggestedZoom });
-      if (zoomSlider) {
-        zoomSlider.value = String(suggestedZoom);
-        updateZoomLabel(suggestedZoom);
-      }
-    }
-
     if (advanced.length) {
       await track.applyConstraints({
         width: { ideal: 1920 },
