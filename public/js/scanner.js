@@ -2,12 +2,24 @@
 let lastScannedValue = "";
 let lastScanAt = 0;
 let decodingBusy = false;
+let liveScanner = null;
+let liveRunning = false;
 
 const statusEl = document.getElementById("statusMessage");
 const cameraInfoEl = document.getElementById("cameraInfoMessage");
+const backBtn = document.getElementById("backBtn");
+
+const modeLiveBtn = document.getElementById("modeLiveBtn");
+const modeNativeBtn = document.getElementById("modeNativeBtn");
+const liveModePanel = document.getElementById("liveModePanel");
+const nativeModePanel = document.getElementById("nativeModePanel");
+
+const startLiveScanBtn = document.getElementById("startLiveScanBtn");
+const stopLiveScanBtn = document.getElementById("stopLiveScanBtn");
+const liveVideoEl = document.getElementById("qrVideo");
+
 const capturePhotoBtn = document.getElementById("capturePhotoBtn");
 const nativePhotoInput = document.getElementById("nativePhotoInput");
-const backBtn = document.getElementById("backBtn");
 
 function setStatus(message) {
   if (statusEl) statusEl.textContent = message;
@@ -26,6 +38,38 @@ function isLikelyUrl(value) {
   }
 }
 
+async function logScannedUrl(value) {
+  try {
+    await fetch("/api/qr/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: value, timestamp: new Date().toISOString() }),
+    });
+  } catch {
+    // non-blocking
+  }
+}
+
+async function handleDetectedValue(value) {
+  const text = typeof value === "string" ? value : value?.data;
+  if (!text) return;
+
+  const now = Date.now();
+  if (text === lastScannedValue && now - lastScanAt < 1800) return;
+
+  lastScannedValue = text;
+  lastScanAt = now;
+
+  await logScannedUrl(text);
+  setStatus(`QR terdeteksi: ${text}`);
+
+  if (isLikelyUrl(text)) {
+    setCameraInfo("Membuka link...");
+    if (liveRunning) await stopLiveScan();
+    window.location.href = text;
+  }
+}
+
 function drawContrastVariant(srcCanvas, contrast = 1.45) {
   const out = document.createElement("canvas");
   out.width = srcCanvas.width;
@@ -38,10 +82,7 @@ function drawContrastVariant(srcCanvas, contrast = 1.45) {
   const data = imageData.data;
 
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
     const boosted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
     data[i] = boosted;
     data[i + 1] = boosted;
@@ -101,7 +142,6 @@ async function scanTinyQrFromImageSource(source, width, height) {
   srcCtx.imageSmoothingEnabled = false;
   srcCtx.drawImage(source, 0, 0, width, height);
 
-  const qrEngine = window.QrScanner;
   const tryScan = async (target) => {
     try {
       return await QrScanner.scanImage(target, {
@@ -127,7 +167,6 @@ async function scanTinyQrFromImageSource(source, width, height) {
   if (!upCtx) return null;
 
   upCtx.imageSmoothingEnabled = false;
-
   for (const v of variants) {
     for (const scale of [0.72, 0.56, 0.42, 0.32, 0.24, 0.18, 0.14]) {
       const cw = Math.floor(width * scale);
@@ -141,44 +180,7 @@ async function scanTinyQrFromImageSource(source, width, height) {
     }
   }
 
-  const grid = [
-    [0.2, 0.2],
-    [0.5, 0.2],
-    [0.8, 0.2],
-    [0.2, 0.5],
-    [0.5, 0.5],
-    [0.8, 0.5],
-    [0.2, 0.8],
-    [0.5, 0.8],
-    [0.8, 0.8],
-  ];
-
-  const cw = Math.floor(width * 0.22);
-  const ch = Math.floor(height * 0.22);
-  for (const v of variants) {
-    for (const [cx, cy] of grid) {
-      const sx = Math.max(0, Math.min(width - cw, Math.floor(width * cx - cw / 2)));
-      const sy = Math.max(0, Math.min(height - ch, Math.floor(height * cy - ch / 2)));
-      upCtx.clearRect(0, 0, up.width, up.height);
-      upCtx.drawImage(v, sx, sy, cw, ch, 0, 0, up.width, up.height);
-      const hit = await tryScan(up);
-      if (hit?.data) return hit;
-    }
-  }
-
   return null;
-}
-
-async function logScannedUrl(value) {
-  try {
-    await fetch("/api/qr/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: value, timestamp: new Date().toISOString() }),
-    });
-  } catch {
-    // non-blocking
-  }
 }
 
 async function scanTinyQrFromNativePhoto(file) {
@@ -189,48 +191,26 @@ async function scanTinyQrFromNativePhoto(file) {
   }
 
   decodingBusy = true;
-  setStatus("Memproses foto...");
+  setStatus("Memproses foto native...");
 
   let bitmap = null;
   try {
     if (typeof createImageBitmap === "function") {
       bitmap = await createImageBitmap(file);
-      setCameraInfo(`${bitmap.width}x${bitmap.height}`);
+      setCameraInfo(`Native: ${bitmap.width}x${bitmap.height}`);
       const hit = await scanTinyQrFromImageSource(bitmap, bitmap.width, bitmap.height);
-      if (hit?.data) {
-        const qrUrl = hit.data;
-        await logScannedUrl(qrUrl);
-        setStatus(`QR terdeteksi: ${qrUrl}`);
-        if (isLikelyUrl(qrUrl)) {
-          setCameraInfo("Membuka link...");
-          await new Promise((r) => setTimeout(r, 800));
-          window.open(qrUrl, "_blank", "noopener,noreferrer");
-          setStatus("Link dibuka. Ambil foto lagi untuk scan berikutnya.");
-        }
-      } else {
-        setStatus("Tidak terbaca. Coba foto lebih terang & fokus.");
-      }
+      if (hit?.data) await handleDetectedValue(hit.data);
+      else setStatus("Tidak terbaca. Coba foto lebih terang & fokus.");
       return;
     }
 
     const img = await loadImageElementFromBlob(file);
     const width = img.naturalWidth || img.width;
     const height = img.naturalHeight || img.height;
-    setCameraInfo(`${width}x${height}`);
+    setCameraInfo(`Native: ${width}x${height}`);
     const hit = await scanTinyQrFromImageSource(img, width, height);
-    if (hit?.data) {
-      const qrUrl = hit.data;
-      await logScannedUrl(qrUrl);
-      setStatus(`QR terdeteksi: ${qrUrl}`);
-      if (isLikelyUrl(qrUrl)) {
-        setCameraInfo("Membuka link...");
-        await new Promise((r) => setTimeout(r, 800));
-        window.open(qrUrl, "_blank", "noopener,noreferrer");
-        setStatus("Link dibuka. Ambil foto lagi untuk scan berikutnya.");
-      }
-    } else {
-      setStatus("Tidak terbaca. Coba foto lebih terang & fokus.");
-    }
+    if (hit?.data) await handleDetectedValue(hit.data);
+    else setStatus("Tidak terbaca. Coba foto lebih terang & fokus.");
   } catch (err) {
     console.error(err);
     setStatus("Gagal memproses foto.");
@@ -240,7 +220,94 @@ async function scanTinyQrFromNativePhoto(file) {
   }
 }
 
+async function setupLiveScanner() {
+  if (liveScanner || !liveVideoEl) return;
+  liveScanner = new QrScanner(
+    liveVideoEl,
+    async (result) => {
+      await handleDetectedValue(typeof result === "string" ? result : result?.data);
+    },
+    {
+      preferredCamera: "environment",
+      maxScansPerSecond: 10,
+      returnDetailedScanResult: true,
+      highlightScanRegion: true,
+      highlightCodeOutline: true,
+    },
+  );
+
+  if (typeof liveScanner.setInversionMode === "function") {
+    liveScanner.setInversionMode("both");
+  }
+}
+
+async function startLiveScan() {
+  try {
+    await setupLiveScanner();
+    if (!liveScanner) return;
+    await liveScanner.start();
+    liveRunning = true;
+    if (startLiveScanBtn) startLiveScanBtn.disabled = true;
+    if (stopLiveScanBtn) stopLiveScanBtn.disabled = false;
+
+    const track = liveVideoEl?.srcObject?.getVideoTracks?.()[0];
+    const settings = track?.getSettings ? track.getSettings() : null;
+    if (settings?.width && settings?.height) {
+      setCameraInfo(`Live: ${settings.width}x${settings.height}`);
+    }
+    setStatus("Scan live aktif. Arahkan kamera ke QR.");
+  } catch (err) {
+    console.error(err);
+    setStatus("Gagal memulai scan live. Cek izin kamera.");
+  }
+}
+
+async function stopLiveScan() {
+  if (!liveScanner || !liveRunning) return;
+  try {
+    await liveScanner.stop();
+  } catch {
+    // ignore
+  }
+  liveRunning = false;
+  if (startLiveScanBtn) startLiveScanBtn.disabled = false;
+  if (stopLiveScanBtn) stopLiveScanBtn.disabled = true;
+}
+
+async function switchMode(mode) {
+  if (mode === "live") {
+    nativeModePanel?.classList.add("d-none");
+    liveModePanel?.classList.remove("d-none");
+    modeLiveBtn?.classList.remove("btn-outline-light");
+    modeLiveBtn?.classList.add("btn-primary");
+    modeNativeBtn?.classList.remove("btn-primary");
+    modeNativeBtn?.classList.add("btn-outline-light");
+    setStatus("Mode live dipilih.");
+    return;
+  }
+
+  await stopLiveScan();
+  liveModePanel?.classList.add("d-none");
+  nativeModePanel?.classList.remove("d-none");
+  modeNativeBtn?.classList.remove("btn-outline-light");
+  modeNativeBtn?.classList.add("btn-primary");
+  modeLiveBtn?.classList.remove("btn-primary");
+  modeLiveBtn?.classList.add("btn-outline-light");
+  setStatus("Mode native dipilih. Ambil foto QR.");
+}
+
 function bindUi() {
+  modeLiveBtn?.addEventListener("click", async () => {
+    await switchMode("live");
+  });
+
+  modeNativeBtn?.addEventListener("click", async () => {
+    await switchMode("native");
+  });
+
+  startLiveScanBtn?.addEventListener("click", startLiveScan);
+  stopLiveScanBtn?.addEventListener("click", stopLiveScan);
+
   capturePhotoBtn?.addEventListener("click", () => {
     nativePhotoInput?.click();
   });
@@ -252,23 +319,27 @@ function bindUi() {
     if (input) input.value = "";
   });
 
-  backBtn?.addEventListener("click", () => {
+  backBtn?.addEventListener("click", async () => {
+    await stopLiveScan();
     if (window.history.length > 1) window.history.back();
     else window.location.href = "/";
   });
 
-  document.addEventListener("visibilitychange", () => {
+  document.addEventListener("visibilitychange", async () => {
     if (document.hidden) {
       decodingBusy = false;
+      await stopLiveScan();
     }
   });
 
-  window.addEventListener("beforeunload", () => {
+  window.addEventListener("beforeunload", async () => {
     decodingBusy = false;
+    await stopLiveScan();
   });
 }
 
 window.addEventListener("load", () => {
   bindUi();
-  setStatus("Tekan tombol untuk ambil foto QR.");
+  switchMode("native");
+  setStatus("Pilih mode scan: live atau native camera.");
 });

@@ -19,12 +19,29 @@
       </div>
 
       <main class="flex-grow-1 d-flex flex-column px-3 pb-3 scanner-main-wrap">
-        <p id="statusMessage" class="text-center mb-2">Tap untuk ambil foto QR...</p>
+        <p id="statusMessage" class="text-center mb-2">Pilih mode scan.</p>
         <p id="cameraInfoMessage" class="text-center small text-warning mb-2"></p>
 
         <section class="scanner-card mb-3">
-          <button id="capturePhotoBtn" class="btn btn-primary btn-lg w-100" type="button">Ambil Foto QR</button>
-          <input id="nativePhotoInput" type="file" accept="image/*" capture="environment" class="d-none" />
+          <div class="d-grid gap-2 mb-3 scanner-mode-switch">
+            <button id="modeLiveBtn" class="btn btn-outline-light" type="button">Scan Biasa (Kamera Live)</button>
+            <button id="modeNativeBtn" class="btn btn-primary" type="button">Scan Native Camera (Foto)</button>
+          </div>
+
+          <div id="liveModePanel" class="d-none">
+            <div class="scanner-video-wrap mb-2">
+              <video id="qrVideo" class="scanner-video" playsinline muted></video>
+            </div>
+            <div class="d-grid gap-2">
+              <button id="startLiveScanBtn" class="btn btn-success" type="button">Mulai Scan Live</button>
+              <button id="stopLiveScanBtn" class="btn btn-danger" type="button" disabled>Stop Scan Live</button>
+            </div>
+          </div>
+
+          <div id="nativeModePanel">
+            <button id="capturePhotoBtn" class="btn btn-primary btn-lg w-100" type="button">Ambil Foto QR</button>
+            <input id="nativePhotoInput" type="file" accept="image/*" capture="environment" class="d-none" />
+          </div>
         </section>
       </main>
 
