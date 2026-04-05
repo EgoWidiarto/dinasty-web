@@ -19,42 +19,12 @@
       </div>
 
       <main class="flex-grow-1 d-flex flex-column px-3 pb-3 scanner-main-wrap">
-        <p id="statusMessage" class="text-center mb-2">Siap memindai QR mini. Tekan "Mulai Scan".</p>
-        <p id="cameraInfoMessage" class="text-center small text-warning mb-2">Kamera belum aktif.</p>
+        <p id="statusMessage" class="text-center mb-2">Tap untuk ambil foto QR...</p>
+        <p id="cameraInfoMessage" class="text-center small text-warning mb-2"></p>
 
         <section class="scanner-card mb-3">
-          <div class="scanner-video-wrap">
-            <video id="qrVideo" class="scanner-video" playsinline muted></video>
-            <div id="scannerOverlay" class="scanner-overlay">
-              <div class="scanner-guide-box"></div>
-            </div>
-          </div>
-
-          <div class="scanner-controls">
-            <button id="startScanBtn" class="btn btn-success scanner-start-btn" type="button">Mulai Scan</button>
-            <button id="stopScanBtn" class="btn btn-danger scanner-stop-btn" type="button" disabled>Stop</button>
-            <button id="toggleTorchBtn" class="btn btn-warning scanner-torch-btn" type="button" disabled>Senter</button>
-            <button id="hdScanBtn" class="btn btn-info scanner-hd-btn" type="button" disabled>Scan HD (QR Mini)</button>
-            <button id="nativePhotoScanBtn" class="btn btn-primary scanner-native-btn" type="button">Scan dari Foto Kamera</button>
-            <input id="nativePhotoInput" type="file" accept="image/*" capture="environment" class="d-none" />
-          </div>
-
-          <div class="zoom-controls mt-2">
-            <button id="zoomOutBtn" class="btn btn-outline-light" type="button" disabled aria-label="Zoom out">−</button>
-            <input id="zoomSlider" type="range" min="1" max="3" step="0.1" value="1" disabled aria-label="Kontrol zoom" />
-            <button id="zoomInBtn" class="btn btn-outline-light" type="button" disabled aria-label="Zoom in">+</button>
-            <span id="zoomLevelDisplay" class="text-warning">100%</span>
-          </div>
-        </section>
-
-        <section id="scanResultCard" class="alert alert-light d-none scanner-result-card" role="status" aria-live="polite">
-          <h5 class="alert-heading mb-2">Hasil QR</h5>
-          <p id="scanResultText" class="mb-2 scanner-result-text"></p>
-          <p id="scanResultMeta" class="mb-2 small text-secondary"></p>
-          <div class="d-flex gap-2 flex-wrap">
-            <button id="copyResultBtn" class="btn btn-warning btn-sm" type="button">Salin Isi QR</button>
-            <button id="openResultBtn" class="btn btn-primary btn-sm" type="button">Buka Link</button>
-          </div>
+          <button id="capturePhotoBtn" class="btn btn-primary btn-lg w-100" type="button">Ambil Foto QR</button>
+          <input id="nativePhotoInput" type="file" accept="image/*" capture="environment" class="d-none" />
         </section>
       </main>
 
