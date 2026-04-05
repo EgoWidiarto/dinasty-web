@@ -2,7 +2,7 @@ const CLIENT_BUILD_VERSION = "2026-04-05-3";
 
 async function resetClientCachesIfNeeded() {
   const lastVersion = localStorage.getItem("dinasty-client-version");
-  if (lastVersion === CLIENT_BUILD_VERSION) return;
+  if (lastVersion === CLIENT_BUILD_VERSION) return false;
 
   try {
     if ("serviceWorker" in navigator) {
@@ -20,15 +20,30 @@ async function resetClientCachesIfNeeded() {
 
   localStorage.setItem("dinasty-client-version", CLIENT_BUILD_VERSION);
   window.location.reload();
+  return true;
 }
 
-// Service Worker Registration dengan auto-reload saat update
-if ("serviceWorker" in navigator) {
-  resetClientCachesIfNeeded().catch((error) => console.warn(error));
+async function initServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  const isScannerPage = window.location.pathname.startsWith("/scanner");
+
+  if (isScannerPage) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+      console.log("ℹ️ Service Worker dinonaktifkan di halaman scanner untuk stabilitas kamera.");
+    } catch (error) {
+      console.warn("Gagal menonaktifkan Service Worker di scanner:", error);
+    }
+    return;
+  }
+
+  const reloading = await resetClientCachesIfNeeded();
+  if (reloading) return;
 
   let refreshing = false;
 
-  // Detect controller change dan reload
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!refreshing) {
       refreshing = true;
@@ -37,29 +52,32 @@ if ("serviceWorker" in navigator) {
     }
   });
 
-  navigator.serviceWorker
-    .register("/sw.js")
-    .then((registration) => {
-      console.log("✅ Service Worker berhasil didaftarkan");
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    console.log("✅ Service Worker berhasil didaftarkan");
 
-      registration.addEventListener("updatefound", () => {
-        const newWorker = registration.installing;
-        if (!newWorker) return;
+    registration.addEventListener("updatefound", () => {
+      const newWorker = registration.installing;
+      if (!newWorker) return;
 
-        newWorker.addEventListener("statechange", () => {
-          if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-            newWorker.postMessage({ type: "SKIP_WAITING" });
-          }
-        });
+      newWorker.addEventListener("statechange", () => {
+        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+          newWorker.postMessage({ type: "SKIP_WAITING" });
+        }
       });
+    });
 
-      // Check for updates setiap 30 detik
-      setInterval(() => {
-        registration.update();
-      }, 30000);
-    })
-    .catch((err) => console.error("❌ Error registrasi Service Worker:", err));
+    setInterval(() => {
+      registration.update().catch(() => {
+        // silent on intermittent network issue
+      });
+    }, 60000);
+  } catch (err) {
+    console.error("❌ Error registrasi Service Worker:", err);
+  }
 }
+
+initServiceWorker().catch((error) => console.warn(error));
 
 // App initialization
 console.log("🚀 Aplikasi Dinamika Sejarah Indonesia dimulai");

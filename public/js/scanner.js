@@ -140,6 +140,38 @@ async function setupZoomAndTorchCapabilities() {
   }
 }
 
+async function optimizeCameraForMiniQr() {
+  if (!scannerRunning || !scanner) return;
+
+  try {
+    const caps = scanner.getRunningTrackCapabilities?.() || {};
+    const advanced = [];
+
+    if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
+      advanced.push({ focusMode: "continuous" });
+    }
+
+    if (caps.focusDistance && Number.isFinite(caps.focusDistance.min) && Number.isFinite(caps.focusDistance.max)) {
+      const near = caps.focusDistance.min + (caps.focusDistance.max - caps.focusDistance.min) * 0.22;
+      advanced.push({ focusDistance: near });
+    }
+
+    if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes("continuous")) {
+      advanced.push({ exposureMode: "continuous" });
+    }
+
+    if (Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes("continuous")) {
+      advanced.push({ whiteBalanceMode: "continuous" });
+    }
+
+    if (advanced.length) {
+      await scanner.applyVideoConstraints({ advanced });
+    }
+  } catch {
+    // capability may not be available on all devices
+  }
+}
+
 async function applyZoom(nextZoom) {
   if (!scannerRunning || !zoomSupported || !zoomSlider) return;
   const min = Number(zoomSlider.min);
@@ -185,9 +217,9 @@ async function startScanner() {
     await scanner.start(
       cameraId,
       {
-        fps: 20,
+        fps: 14,
         qrbox: (vw, vh) => {
-          const side = Math.floor(Math.min(vw, vh) * 0.62);
+          const side = Math.floor(Math.min(vw, vh) * 0.42);
           return { width: side, height: side };
         },
         aspectRatio: 1,
@@ -195,7 +227,7 @@ async function startScanner() {
         videoConstraints: {
           width: { ideal: 1920 },
           height: { ideal: 1920 },
-          frameRate: { ideal: 30, max: 60 },
+          frameRate: { ideal: 24, max: 30 },
           facingMode: "environment",
         },
       },
@@ -210,6 +242,7 @@ async function startScanner() {
     if (stopBtn) stopBtn.disabled = false;
 
     await setupZoomAndTorchCapabilities();
+    await optimizeCameraForMiniQr();
     setStatus("Scanner aktif (tanpa auto zoom). Dekatkan QR mini 8-12 cm dan tahan stabil.");
   } catch (error) {
     console.error(error);
