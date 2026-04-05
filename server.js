@@ -20,6 +20,7 @@ app.use(
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
         imgSrc: ["'self'", "data:", "blob:"],
+        workerSrc: ["'self'", "blob:"],
         connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://api.groq.com", "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
       },
     },
