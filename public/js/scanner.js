@@ -8,6 +8,25 @@ let lastScanAt = 0;
 let lastScannedValue = "";
 let aggressiveFallbackInterval = null;
 let aggressiveFallbackBusy = false;
+let fallbackPhase = 0;
+let fallbackRegionCursor = 0;
+let miniAggressiveTick = 0;
+
+const FALLBACK_INTERVAL_MS = 900;
+const MINI_UPSCALE_SIZE = 1400;
+const MINI_DEEP_PASS_EVERY = 3;
+const MINI_CENTER_SCALES = [0.42, 0.34, 0.28, 0.22];
+const FALLBACK_GRID = [
+  { x: 0.2, y: 0.2 },
+  { x: 0.5, y: 0.2 },
+  { x: 0.8, y: 0.2 },
+  { x: 0.2, y: 0.5 },
+  { x: 0.5, y: 0.5 },
+  { x: 0.8, y: 0.5 },
+  { x: 0.2, y: 0.8 },
+  { x: 0.5, y: 0.8 },
+  { x: 0.8, y: 0.8 },
+];
 
 const statusEl = document.getElementById("statusMessage");
 const resultCardEl = document.getElementById("scanResultCard");
@@ -114,54 +133,16 @@ function stopAggressiveFallbackAssist() {
   }
 }
 
-function getAggressiveScanRegions(video) {
-  const width = video?.videoWidth || 0;
-  const height = video?.videoHeight || 0;
-  if (!width || !height) return [];
-
-  const minSide = Math.min(width, height);
-  const baseSize = Math.max(220, Math.floor(minSide * 0.56));
-  const innerSize = Math.max(180, Math.floor(minSide * 0.42));
-  const tightSize = Math.max(140, Math.floor(minSide * 0.28));
-  const microSize = Math.max(110, Math.floor(minSide * 0.18));
-
-  const centers = [
-    [0.5, 0.5],
-    [0.25, 0.25],
-    [0.5, 0.35],
-    [0.75, 0.25],
-    [0.5, 0.65],
-    [0.25, 0.5],
-    [0.35, 0.5],
-    [0.65, 0.5],
-    [0.3, 0.3],
-    [0.7, 0.3],
-    [0.5, 0.25],
-    [0.5, 0.75],
-    [0.3, 0.7],
-    [0.7, 0.7],
-    [0.25, 0.75],
-    [0.75, 0.75],
-  ];
-
-  const sizes = [baseSize, innerSize, tightSize, microSize];
-  const regions = [];
-
-  for (const size of sizes) {
-    for (const [cx, cy] of centers) {
-      regions.push({
-        x: Math.max(0, Math.round(width * cx - size / 2)),
-        y: Math.max(0, Math.round(height * cy - size / 2)),
-        width: Math.min(size, width),
-        height: Math.min(size, height),
-        downScaledWidth: 2400,
-        downScaledHeight: 2400,
-      });
-    }
+async function tryScanImageTarget(target, qrEngine) {
+  try {
+    return await QrScanner.scanImage(target, {
+      qrEngine,
+      returnDetailedScanResult: true,
+      alsoTryWithoutScanRegion: true,
+    });
+  } catch {
+    return null;
   }
-
-  regions.push(null);
-  return regions;
 }
 
 async function runAggressiveMiniFallbackScan() {
@@ -172,27 +153,68 @@ async function runAggressiveMiniFallbackScan() {
   aggressiveFallbackBusy = true;
   try {
     const qrEngine = scanner._qrEnginePromise;
-    const canvas = scanner.$canvas;
-    const regions = getAggressiveScanRegions(videoEl);
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
 
-    for (const scanRegion of regions) {
-      try {
-        const result = await QrScanner.scanImage(videoEl, {
-          scanRegion,
-          qrEngine,
-          canvas,
-          disallowCanvasResizing: true,
-          alsoTryWithoutScanRegion: true,
-          returnDetailedScanResult: true,
-        });
+    const srcCanvas = document.createElement("canvas");
+    srcCanvas.width = vw;
+    srcCanvas.height = vh;
+    const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
+    if (!srcCtx) return;
+    srcCtx.imageSmoothingEnabled = false;
+    srcCtx.drawImage(videoEl, 0, 0, vw, vh);
 
-        if (result?.data) {
-          await onDecode(result);
-          return;
-        }
-      } catch {
-        // try next region
+    const upCanvas = document.createElement("canvas");
+    upCanvas.width = MINI_UPSCALE_SIZE;
+    upCanvas.height = MINI_UPSCALE_SIZE;
+    const upCtx = upCanvas.getContext("2d", { willReadFrequently: true });
+    if (!upCtx) return;
+    upCtx.imageSmoothingEnabled = false;
+
+    let hit = null;
+
+    if (fallbackPhase === 0) {
+      hit = await tryScanImageTarget(srcCanvas, qrEngine);
+    }
+
+    if (!hit && fallbackPhase === 1) {
+      const scale = 0.38;
+      const cw = Math.floor(vw * scale);
+      const ch = Math.floor(vh * scale);
+      const sx = Math.floor((vw - cw) / 2);
+      const sy = Math.floor((vh - ch) / 2);
+      upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, upCanvas.width, upCanvas.height);
+      hit = await tryScanImageTarget(upCanvas, qrEngine);
+    }
+
+    if (!hit && fallbackPhase === 2) {
+      const region = FALLBACK_GRID[fallbackRegionCursor % FALLBACK_GRID.length];
+      fallbackRegionCursor += 1;
+      const cw = Math.floor(vw * 0.28);
+      const ch = Math.floor(vh * 0.28);
+      const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * region.x - cw / 2)));
+      const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * region.y - ch / 2)));
+      upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, upCanvas.width, upCanvas.height);
+      hit = await tryScanImageTarget(upCanvas, qrEngine);
+    }
+
+    fallbackPhase = (fallbackPhase + 1) % 3;
+    miniAggressiveTick += 1;
+
+    if (!hit && miniAggressiveTick % MINI_DEEP_PASS_EVERY === 0) {
+      for (const scale of MINI_CENTER_SCALES) {
+        const cw = Math.floor(vw * scale);
+        const ch = Math.floor(vh * scale);
+        const sx = Math.floor((vw - cw) / 2);
+        const sy = Math.floor((vh - ch) / 2);
+        upCtx.drawImage(srcCanvas, sx, sy, cw, ch, 0, 0, upCanvas.width, upCanvas.height);
+        hit = await tryScanImageTarget(upCanvas, qrEngine);
+        if (hit) break;
       }
+    }
+
+    if (hit?.data) {
+      await onDecode(hit);
     }
   } finally {
     aggressiveFallbackBusy = false;
@@ -206,9 +228,9 @@ function startAggressiveFallbackAssist() {
   aggressiveFallbackInterval = setInterval(async () => {
     if (!scannerRunning) return;
     const idleMs = Date.now() - lastScanAt;
-    if (idleMs < 650) return;
+    if (idleMs < 700) return;
     await runAggressiveMiniFallbackScan();
-  }, 700);
+  }, FALLBACK_INTERVAL_MS);
 }
 
 async function setupCamera() {
@@ -227,14 +249,14 @@ async function setupCamera() {
         returnDetailedScanResult: true,
         calculateScanRegion: (video) => {
           const smaller = Math.min(video.videoWidth, video.videoHeight);
-          const scanSize = Math.floor(smaller * 0.82);
+          const scanSize = Math.floor(smaller * 0.62);
           return {
             x: Math.floor((video.videoWidth - scanSize) / 2),
             y: Math.floor((video.videoHeight - scanSize) / 2),
             width: scanSize,
             height: scanSize,
-            downScaledWidth: 2200,
-            downScaledHeight: 2200,
+            downScaledWidth: 1400,
+            downScaledHeight: 1400,
           };
         },
       },
@@ -298,11 +320,6 @@ async function optimizeCameraForMiniQr() {
 
     if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
       advanced.push({ focusMode: "continuous" });
-    }
-
-    if (caps.focusDistance && Number.isFinite(caps.focusDistance.min) && Number.isFinite(caps.focusDistance.max)) {
-      const near = caps.focusDistance.min + (caps.focusDistance.max - caps.focusDistance.min) * 0.22;
-      advanced.push({ focusDistance: near });
     }
 
     if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes("continuous")) {
@@ -379,6 +396,9 @@ async function startScanner() {
 
     scannerRunning = true;
     lastScanAt = Date.now();
+    fallbackPhase = 0;
+    fallbackRegionCursor = 0;
+    miniAggressiveTick = 0;
     if (startBtn) startBtn.disabled = true;
     if (stopBtn) stopBtn.disabled = false;
 
