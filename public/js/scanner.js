@@ -438,7 +438,7 @@ async function stopScanner() {
     }
 
     stopAutoZoomAssist();
-  stopAggressiveFallbackAssist();
+    stopAggressiveFallbackAssist();
 
     scannerRunning = false;
     torchEnabled = false;
