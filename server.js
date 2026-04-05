@@ -37,6 +37,8 @@ app.use((req, res, next) => {
 
   if (req.path.includes("qr-scanner")) {
     res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+    // Force plain JavaScript, not module/transpiled  
+    res.setHeader("Content-Type", "application/javascript; charset=utf-8");
   }
 
   next();
