@@ -1,10 +1,9 @@
-/* global Html5Qrcode */
+/* global QrScanner */
 let scanner = null;
 let scannerRunning = false;
 let scannerTransitioning = false;
 let torchEnabled = false;
 let zoomSupported = false;
-let cameraId = null;
 let lastScanAt = 0;
 let lastScannedValue = "";
 
@@ -21,6 +20,13 @@ const zoomSlider = document.getElementById("zoomSlider");
 const zoomLabel = document.getElementById("zoomLevelDisplay");
 const openBtn = document.getElementById("openResultBtn");
 const copyBtn = document.getElementById("copyResultBtn");
+
+function getTrack() {
+  const stream = document.getElementById("qrVideo")?.srcObject;
+  if (!stream) return null;
+  const tracks = stream.getVideoTracks();
+  return tracks.length ? tracks[0] : null;
+}
 
 function setStatus(message) {
   if (statusEl) statusEl.textContent = message;
@@ -84,7 +90,8 @@ async function fetchQrInfo(value) {
   return "QR terdeteksi.";
 }
 
-async function onDecode(text) {
+async function onDecode(decoded) {
+  const text = typeof decoded === "string" ? decoded : decoded?.data;
   if (!text) return;
   const now = Date.now();
   if (text === lastScannedValue && now - lastScanAt < 1800) return;
@@ -99,15 +106,45 @@ async function onDecode(text) {
 }
 
 async function setupCamera() {
-  if (!window.Html5Qrcode) throw new Error("html5-qrcode tidak tersedia.");
+  if (!window.QrScanner) throw new Error("Nimiq QrScanner tidak tersedia.");
 
   if (!scanner) {
-    scanner = new Html5Qrcode("qrVideo", { formatsToSupport: [0] });
-  }
+    const videoEl = document.getElementById("qrVideo");
+    scanner = new QrScanner(
+      videoEl,
+      onDecode,
+      {
+        preferredCamera: "environment",
+        maxScansPerSecond: 25,
+        highlightScanRegion: true,
+        highlightCodeOutline: true,
+        returnDetailedScanResult: true,
+        calculateScanRegion: (video) => {
+          const smaller = Math.min(video.videoWidth, video.videoHeight);
+          const scanSize = Math.floor(smaller * 0.62);
+          return {
+            x: Math.floor((video.videoWidth - scanSize) / 2),
+            y: Math.floor((video.videoHeight - scanSize) / 2),
+            width: scanSize,
+            height: scanSize,
+            downScaledWidth: 1400,
+            downScaledHeight: 1400,
+          };
+        },
+      },
+      () => {
+        // ignore no-qr frame
+      },
+    );
 
-  const cameras = await Html5Qrcode.getCameras();
-  if (!cameras || !cameras.length) throw new Error("Kamera tidak ditemukan.");
-  cameraId = cameras.find((cam) => /back|rear|environment/i.test(cam.label))?.id || cameras[0].id;
+    if (typeof scanner.setInversionMode === "function") {
+      scanner.setInversionMode("both");
+    }
+
+    if (typeof QrScanner.setGrayscaleWeights === "function") {
+      QrScanner.setGrayscaleWeights(77, 150, 29, true);
+    }
+  }
 }
 
 async function setupZoomAndTorchCapabilities() {
@@ -117,7 +154,8 @@ async function setupZoomAndTorchCapabilities() {
   if (torchBtn) torchBtn.disabled = true;
 
   try {
-    const capabilities = scanner.getRunningTrackCapabilities?.() || {};
+    const track = getTrack();
+    const capabilities = track?.getCapabilities ? track.getCapabilities() : {};
 
     if (capabilities.zoom && zoomSlider) {
       zoomSupported = true;
@@ -131,12 +169,15 @@ async function setupZoomAndTorchCapabilities() {
     } else {
       updateZoomLabel(1);
     }
-
-    if (capabilities.torch && torchBtn) {
-      torchBtn.disabled = false;
-    }
   } catch {
     // ignore capabilities errors
+  }
+
+  try {
+    const hasFlash = await scanner.hasFlash();
+    if (torchBtn) torchBtn.disabled = !hasFlash;
+  } catch {
+    if (torchBtn) torchBtn.disabled = true;
   }
 }
 
@@ -144,7 +185,9 @@ async function optimizeCameraForMiniQr() {
   if (!scannerRunning || !scanner) return;
 
   try {
-    const caps = scanner.getRunningTrackCapabilities?.() || {};
+    const track = getTrack();
+    if (!track || typeof track.getCapabilities !== "function") return;
+    const caps = track.getCapabilities() || {};
     const advanced = [];
 
     if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
@@ -165,7 +208,12 @@ async function optimizeCameraForMiniQr() {
     }
 
     if (advanced.length) {
-      await scanner.applyVideoConstraints({ advanced });
+      await track.applyConstraints({
+        width: { ideal: 1920 },
+        height: { ideal: 1920 },
+        frameRate: { ideal: 24, max: 30 },
+        advanced,
+      });
     }
   } catch {
     // capability may not be available on all devices
@@ -174,12 +222,15 @@ async function optimizeCameraForMiniQr() {
 
 async function applyZoom(nextZoom) {
   if (!scannerRunning || !zoomSupported || !zoomSlider) return;
+  const track = getTrack();
+  if (!track) return;
+
   const min = Number(zoomSlider.min);
   const max = Number(zoomSlider.max);
   const value = Math.max(min, Math.min(max, Number(nextZoom)));
 
   try {
-    await scanner.applyVideoConstraints({ advanced: [{ zoom: value }] });
+    await track.applyConstraints({ advanced: [{ zoom: value }] });
     zoomSlider.value = String(value);
     updateZoomLabel(value);
   } catch {
@@ -192,7 +243,11 @@ async function toggleTorch() {
 
   try {
     torchEnabled = !torchEnabled;
-    await scanner.applyVideoConstraints({ advanced: [{ torch: torchEnabled }] });
+    if (torchEnabled) {
+      await scanner.turnFlashOn();
+    } else {
+      await scanner.turnFlashOff();
+    }
     torchBtn.textContent = torchEnabled ? "Senter Off" : "Senter";
   } catch {
     torchEnabled = false;
@@ -214,28 +269,7 @@ async function startScanner() {
 
     await setupCamera();
 
-    await scanner.start(
-      cameraId,
-      {
-        fps: 14,
-        qrbox: (vw, vh) => {
-          const side = Math.floor(Math.min(vw, vh) * 0.42);
-          return { width: side, height: side };
-        },
-        aspectRatio: 1,
-        disableFlip: false,
-        videoConstraints: {
-          width: { ideal: 1920 },
-          height: { ideal: 1920 },
-          frameRate: { ideal: 24, max: 30 },
-          facingMode: "environment",
-        },
-      },
-      onDecode,
-      () => {
-        // ignore decode miss
-      },
-    );
+    await scanner.start();
 
     scannerRunning = true;
     if (startBtn) startBtn.disabled = true;
@@ -261,7 +295,8 @@ async function stopScanner() {
   try {
     if (scanner && scannerRunning) {
       await scanner.stop();
-      await scanner.clear();
+      scanner.destroy();
+      scanner = null;
     }
 
     scannerRunning = false;

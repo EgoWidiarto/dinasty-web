@@ -1,4 +1,4 @@
-const CACHE_VERSION = "dinasty-static-v2026-04-05-4";
+const CACHE_VERSION = "dinasty-static-v2026-04-05-5";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -78,6 +78,11 @@ self.addEventListener("fetch", (event) => {
 
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(fetch(request));
+    return;
+  }
+
+  if (url.pathname.startsWith("/scanner") || url.pathname === "/js/scanner.js") {
+    event.respondWith(networkFirst(request));
     return;
   }
 

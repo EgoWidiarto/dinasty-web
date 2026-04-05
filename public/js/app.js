@@ -1,4 +1,4 @@
-const CLIENT_BUILD_VERSION = "2026-04-05-3";
+const CLIENT_BUILD_VERSION = "2026-04-05-4";
 
 async function resetClientCachesIfNeeded() {
   const lastVersion = localStorage.getItem("dinasty-client-version");
