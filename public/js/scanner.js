@@ -9,13 +9,8 @@ const statusEl = document.getElementById("statusMessage");
 const cameraInfoEl = document.getElementById("cameraInfoMessage");
 const backBtn = document.getElementById("backBtn");
 
-const modeLiveBtn = document.getElementById("modeLiveBtn");
-const modeNativeBtn = document.getElementById("modeNativeBtn");
+const startScanBtn = document.getElementById("startScanBtn");
 const liveModePanel = document.getElementById("liveModePanel");
-const nativeModePanel = document.getElementById("nativeModePanel");
-
-const startLiveScanBtn = document.getElementById("startLiveScanBtn");
-const stopLiveScanBtn = document.getElementById("stopLiveScanBtn");
 const liveVideoEl = document.getElementById("qrVideo");
 
 const capturePhotoBtn = document.getElementById("capturePhotoBtn");
@@ -242,13 +237,14 @@ async function setupLiveScanner() {
 }
 
 async function startLiveScan() {
+  if (liveRunning) return;
   try {
     await setupLiveScanner();
     if (!liveScanner) return;
+    liveModePanel?.classList.remove("d-none");
     await liveScanner.start();
     liveRunning = true;
-    if (startLiveScanBtn) startLiveScanBtn.disabled = true;
-    if (stopLiveScanBtn) stopLiveScanBtn.disabled = false;
+    if (startScanBtn) startScanBtn.disabled = true;
 
     const track = liveVideoEl?.srcObject?.getVideoTracks?.()[0];
     const settings = track?.getSettings ? track.getSettings() : null;
@@ -270,45 +266,14 @@ async function stopLiveScan() {
     // ignore
   }
   liveRunning = false;
-  if (startLiveScanBtn) startLiveScanBtn.disabled = false;
-  if (stopLiveScanBtn) stopLiveScanBtn.disabled = true;
-}
-
-async function switchMode(mode) {
-  if (mode === "live") {
-    nativeModePanel?.classList.add("d-none");
-    liveModePanel?.classList.remove("d-none");
-    modeLiveBtn?.classList.remove("btn-outline-light");
-    modeLiveBtn?.classList.add("btn-primary");
-    modeNativeBtn?.classList.remove("btn-primary");
-    modeNativeBtn?.classList.add("btn-outline-light");
-    setStatus("Mode live dipilih.");
-    return;
-  }
-
-  await stopLiveScan();
-  liveModePanel?.classList.add("d-none");
-  nativeModePanel?.classList.remove("d-none");
-  modeNativeBtn?.classList.remove("btn-outline-light");
-  modeNativeBtn?.classList.add("btn-primary");
-  modeLiveBtn?.classList.remove("btn-primary");
-  modeLiveBtn?.classList.add("btn-outline-light");
-  setStatus("Mode native dipilih. Ambil foto QR.");
+  if (startScanBtn) startScanBtn.disabled = false;
 }
 
 function bindUi() {
-  modeLiveBtn?.addEventListener("click", async () => {
-    await switchMode("live");
-  });
+  startScanBtn?.addEventListener("click", startLiveScan);
 
-  modeNativeBtn?.addEventListener("click", async () => {
-    await switchMode("native");
-  });
-
-  startLiveScanBtn?.addEventListener("click", startLiveScan);
-  stopLiveScanBtn?.addEventListener("click", stopLiveScan);
-
-  capturePhotoBtn?.addEventListener("click", () => {
+  capturePhotoBtn?.addEventListener("click", async () => {
+    await stopLiveScan();
     nativePhotoInput?.click();
   });
 
@@ -340,6 +305,5 @@ function bindUi() {
 
 window.addEventListener("load", () => {
   bindUi();
-  switchMode("native");
-  setStatus("Pilih mode scan: live atau native camera.");
+  setStatus("Pilih: Mulai Scan atau Unggah Gambar.");
 });
