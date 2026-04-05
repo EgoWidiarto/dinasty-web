@@ -115,20 +115,20 @@ async function setupCamera() {
       onDecode,
       {
         preferredCamera: "environment",
-        maxScansPerSecond: 25,
+        maxScansPerSecond: 12,
         highlightScanRegion: true,
         highlightCodeOutline: true,
         returnDetailedScanResult: true,
         calculateScanRegion: (video) => {
           const smaller = Math.min(video.videoWidth, video.videoHeight);
-          const scanSize = Math.floor(smaller * 0.62);
+          const scanSize = Math.floor(smaller * 0.52);
           return {
             x: Math.floor((video.videoWidth - scanSize) / 2),
             y: Math.floor((video.videoHeight - scanSize) / 2),
             width: scanSize,
             height: scanSize,
-            downScaledWidth: 1400,
-            downScaledHeight: 1400,
+            downScaledWidth: 960,
+            downScaledHeight: 960,
           };
         },
       },
@@ -207,6 +207,15 @@ async function optimizeCameraForMiniQr() {
       advanced.push({ whiteBalanceMode: "continuous" });
     }
 
+    if (caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max)) {
+      const suggestedZoom = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.4;
+      advanced.push({ zoom: suggestedZoom });
+      if (zoomSlider) {
+        zoomSlider.value = String(suggestedZoom);
+        updateZoomLabel(suggestedZoom);
+      }
+    }
+
     if (advanced.length) {
       await track.applyConstraints({
         width: { ideal: 1920 },
@@ -277,7 +286,7 @@ async function startScanner() {
 
     await setupZoomAndTorchCapabilities();
     await optimizeCameraForMiniQr();
-    setStatus("Scanner aktif (tanpa auto zoom). Dekatkan QR mini 8-12 cm dan tahan stabil.");
+    setStatus("Scanner aktif. Posisikan QR mini di area kotak, jarak 8-12 cm, lalu tahan stabil 1-2 detik.");
   } catch (error) {
     console.error(error);
     setStatus("Gagal memulai scanner. Pastikan izin kamera aktif.");
