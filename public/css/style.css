@@ -479,9 +479,9 @@ h1.title-sub {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  margin-top: -0.5rem;
+  margin-top: -1.5rem;
   margin-left: 1rem;
-  margin-bottom: 0rem;
+  margin-bottom: 0;
 }
 
 .scanner-back-btn img {
@@ -1030,6 +1030,7 @@ body.scanner-page #reader .scanner-torch-btn:active {
 
 .scanner-main-wrap {
   gap: 0.75rem;
+  justify-content: center;
 }
 
 .scanner-card {
