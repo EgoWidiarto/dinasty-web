@@ -41,6 +41,8 @@ const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomSlider = document.getElementById("zoomSlider");
 const zoomLabel = document.getElementById("zoomLevelDisplay");
 const hdScanBtn = document.getElementById("hdScanBtn");
+const nativePhotoScanBtn = document.getElementById("nativePhotoScanBtn");
+const nativePhotoInput = document.getElementById("nativePhotoInput");
 const openBtn = document.getElementById("openResultBtn");
 const copyBtn = document.getElementById("copyResultBtn");
 const cameraInfoEl = document.getElementById("cameraInfoMessage");
@@ -149,6 +151,176 @@ async function tryScanImageTarget(target, qrEngine) {
     });
   } catch {
     return null;
+  }
+}
+
+function drawContrastVariant(srcCanvas, contrast = 1.45) {
+  const out = document.createElement("canvas");
+  out.width = srcCanvas.width;
+  out.height = srcCanvas.height;
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return srcCanvas;
+
+  ctx.drawImage(srcCanvas, 0, 0);
+  const imageData = ctx.getImageData(0, 0, out.width, out.height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    const boosted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
+    data[i] = boosted;
+    data[i + 1] = boosted;
+    data[i + 2] = boosted;
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return out;
+}
+
+function drawBinaryVariant(srcCanvas, threshold = 145) {
+  const out = document.createElement("canvas");
+  out.width = srcCanvas.width;
+  out.height = srcCanvas.height;
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return srcCanvas;
+
+  ctx.drawImage(srcCanvas, 0, 0);
+  const imageData = ctx.getImageData(0, 0, out.width, out.height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const bw = gray >= threshold ? 255 : 0;
+    data[i] = bw;
+    data[i + 1] = bw;
+    data[i + 2] = bw;
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return out;
+}
+
+async function scanTinyQrFromImageSource(source, width, height) {
+  const src = document.createElement("canvas");
+  src.width = width;
+  src.height = height;
+  const srcCtx = src.getContext("2d", { willReadFrequently: true });
+  if (!srcCtx) return null;
+
+  srcCtx.imageSmoothingEnabled = false;
+  srcCtx.drawImage(source, 0, 0, width, height);
+
+  const qrEngine = scanner?._qrEnginePromise;
+  const tryScan = async (target) => {
+    try {
+      return await QrScanner.scanImage(target, {
+        qrEngine,
+        returnDetailedScanResult: true,
+        alsoTryWithoutScanRegion: true,
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const variants = [src, drawContrastVariant(src, 1.45), drawBinaryVariant(src, 140), drawBinaryVariant(src, 165)];
+  for (const v of variants) {
+    const hit = await tryScan(v);
+    if (hit?.data) return hit;
+  }
+
+  const up = document.createElement("canvas");
+  const upSize = Math.min(3600, Math.max(2600, Math.floor(Math.min(width, height) * 1.8)));
+  up.width = upSize;
+  up.height = upSize;
+  const upCtx = up.getContext("2d", { willReadFrequently: true });
+  if (!upCtx) return null;
+
+  upCtx.imageSmoothingEnabled = false;
+
+  for (const v of variants) {
+    for (const scale of [0.72, 0.56, 0.42, 0.32, 0.24, 0.18, 0.14]) {
+      const cw = Math.floor(width * scale);
+      const ch = Math.floor(height * scale);
+      const sx = Math.floor((width - cw) / 2);
+      const sy = Math.floor((height - ch) / 2);
+      upCtx.clearRect(0, 0, up.width, up.height);
+      upCtx.drawImage(v, sx, sy, cw, ch, 0, 0, up.width, up.height);
+      const hit = await tryScan(up);
+      if (hit?.data) return hit;
+    }
+  }
+
+  const grid = [
+    [0.2, 0.2],
+    [0.5, 0.2],
+    [0.8, 0.2],
+    [0.2, 0.5],
+    [0.5, 0.5],
+    [0.8, 0.5],
+    [0.2, 0.8],
+    [0.5, 0.8],
+    [0.8, 0.8],
+  ];
+
+  const cw = Math.floor(width * 0.22);
+  const ch = Math.floor(height * 0.22);
+  for (const v of variants) {
+    for (const [cx, cy] of grid) {
+      const sx = Math.max(0, Math.min(width - cw, Math.floor(width * cx - cw / 2)));
+      const sy = Math.max(0, Math.min(height - ch, Math.floor(height * cy - ch / 2)));
+      upCtx.clearRect(0, 0, up.width, up.height);
+      upCtx.drawImage(v, sx, sy, cw, ch, 0, 0, up.width, up.height);
+      const hit = await tryScan(up);
+      if (hit?.data) return hit;
+    }
+  }
+
+  return null;
+}
+
+async function scanTinyQrFromNativePhoto(file) {
+  if (!file) return;
+  if (!/^image\//i.test(file.type)) {
+    setStatus("File bukan gambar.");
+    return;
+  }
+
+  setStatus("Memproses foto kamera asli...");
+
+  let bitmap = null;
+  try {
+    if (typeof createImageBitmap === "function") {
+      bitmap = await createImageBitmap(file);
+      setCameraInfo(`Foto native: ${bitmap.width}x${bitmap.height}`);
+      const hit = await scanTinyQrFromImageSource(bitmap, bitmap.width, bitmap.height);
+      if (hit?.data) {
+        await onDecode(hit);
+        setStatus("QR mini terbaca dari foto kamera asli.");
+      } else {
+        setStatus("Masih belum terbaca. Coba foto lebih dekat dan terang, lalu ulangi.");
+      }
+      return;
+    }
+
+    const img = await loadImageElementFromBlob(file);
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    setCameraInfo(`Foto native: ${width}x${height}`);
+    const hit = await scanTinyQrFromImageSource(img, width, height);
+    if (hit?.data) {
+      await onDecode(hit);
+      setStatus("QR mini terbaca dari foto kamera asli.");
+    } else {
+      setStatus("Masih belum terbaca. Coba foto lebih dekat dan terang, lalu ulangi.");
+    }
+  } catch {
+    setStatus("Gagal memproses foto kamera.");
+  } finally {
+    if (bitmap) bitmap.close();
   }
 }
 
@@ -540,81 +712,13 @@ async function scanMiniQrViaHdSnapshot() {
 
   let hdCapture = null;
   try {
-    const qrEngine = scanner._qrEnginePromise;
     hdCapture = await captureHdSource(video);
     const vw = hdCapture.width;
     const vh = hdCapture.height;
 
     setCameraInfo(`Mode HD source: ${hdCapture.sourceType} | ${vw}x${vh}`);
 
-    const src = document.createElement("canvas");
-    src.width = vw;
-    src.height = vh;
-    const srcCtx = src.getContext("2d", { willReadFrequently: true });
-    if (!srcCtx) return;
-    srcCtx.imageSmoothingEnabled = false;
-    srcCtx.drawImage(hdCapture.source, 0, 0, vw, vh);
-
-    const tryScan = async (target) => {
-      try {
-        const res = await QrScanner.scanImage(target, {
-          qrEngine,
-          returnDetailedScanResult: true,
-          alsoTryWithoutScanRegion: true,
-        });
-        return res?.data ? res : null;
-      } catch {
-        return null;
-      }
-    };
-
-    let hit = await tryScan(src);
-
-    const up = document.createElement("canvas");
-    const upscaleSize = Math.min(3200, Math.max(2200, Math.floor(Math.min(vw, vh) * 1.5)));
-    up.width = upscaleSize;
-    up.height = upscaleSize;
-    const upCtx = up.getContext("2d", { willReadFrequently: true });
-    if (!upCtx) return;
-    upCtx.imageSmoothingEnabled = false;
-
-    if (!hit) {
-      for (const scale of [0.72, 0.56, 0.42, 0.32, 0.24, 0.18]) {
-        const cw = Math.floor(vw * scale);
-        const ch = Math.floor(vh * scale);
-        const sx = Math.floor((vw - cw) / 2);
-        const sy = Math.floor((vh - ch) / 2);
-        upCtx.clearRect(0, 0, up.width, up.height);
-        upCtx.drawImage(src, sx, sy, cw, ch, 0, 0, up.width, up.height);
-        hit = await tryScan(up);
-        if (hit) break;
-      }
-    }
-
-    if (!hit) {
-      const grid = [
-        [0.2, 0.2],
-        [0.5, 0.2],
-        [0.8, 0.2],
-        [0.2, 0.5],
-        [0.5, 0.5],
-        [0.8, 0.5],
-        [0.2, 0.8],
-        [0.5, 0.8],
-        [0.8, 0.8],
-      ];
-
-      const cw = Math.floor(vw * 0.24);
-      const ch = Math.floor(vh * 0.24);
-      for (const [cx, cy] of grid) {
-        const sx = Math.max(0, Math.min(vw - cw, Math.floor(vw * cx - cw / 2)));
-        const sy = Math.max(0, Math.min(vh - ch, Math.floor(vh * cy - ch / 2)));
-        upCtx.clearRect(0, 0, up.width, up.height);
-        upCtx.drawImage(src, sx, sy, cw, ch, 0, 0, up.width, up.height);
-        hit = await tryScan(up);
-        if (hit) break;
-      }
-    }
+    const hit = await scanTinyQrFromImageSource(hdCapture.source, vw, vh);
 
     if (hit?.data) {
       await onDecode(hit);
@@ -641,6 +745,16 @@ function bindUi() {
   stopBtn?.addEventListener("click", stopScanner);
   torchBtn?.addEventListener("click", toggleTorch);
   hdScanBtn?.addEventListener("click", scanMiniQrViaHdSnapshot);
+  nativePhotoScanBtn?.addEventListener("click", () => {
+    nativePhotoInput?.click();
+  });
+
+  nativePhotoInput?.addEventListener("change", async (event) => {
+    const input = event.target;
+    const file = input?.files?.[0];
+    if (file) await scanTinyQrFromNativePhoto(file);
+    if (input) input.value = "";
+  });
 
   zoomSlider?.addEventListener("input", async (event) => {
     await applyZoom(event.target.value);
