@@ -43,6 +43,7 @@ const zoomLabel = document.getElementById("zoomLevelDisplay");
 const hdScanBtn = document.getElementById("hdScanBtn");
 const openBtn = document.getElementById("openResultBtn");
 const copyBtn = document.getElementById("copyResultBtn");
+const cameraInfoEl = document.getElementById("cameraInfoMessage");
 
 function getTrack() {
   const stream = document.getElementById("qrVideo")?.srcObject;
@@ -53,6 +54,10 @@ function getTrack() {
 
 function setStatus(message) {
   if (statusEl) statusEl.textContent = message;
+}
+
+function setCameraInfo(message) {
+  if (cameraInfoEl) cameraInfoEl.textContent = message;
 }
 
 function showResult(text, meta = "") {
@@ -322,6 +327,10 @@ async function optimizeCameraForMiniQr() {
     const caps = track.getCapabilities() || {};
     const advanced = [];
 
+    const maxWidth = Number(caps.width?.max) || 1920;
+    const maxHeight = Number(caps.height?.max) || 1920;
+    const maxFps = Number(caps.frameRate?.max) || 30;
+
     if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
       advanced.push({ focusMode: "continuous" });
     }
@@ -338,17 +347,80 @@ async function optimizeCameraForMiniQr() {
       advanced.push({ whiteBalanceMode: "continuous" });
     }
 
-    if (advanced.length) {
-      await track.applyConstraints({
-        width: { ideal: 1920 },
-        height: { ideal: 1920 },
-        frameRate: { ideal: 24, max: 30 },
-        advanced,
-      });
-    }
+    const constraints = {
+      width: { ideal: maxWidth, max: maxWidth },
+      height: { ideal: maxHeight, max: maxHeight },
+      frameRate: { ideal: Math.min(30, maxFps), max: maxFps },
+      advanced,
+    };
+
+    await track.applyConstraints(constraints);
+
+    const settings = track.getSettings ? track.getSettings() : null;
+    const width = settings?.width || "-";
+    const height = settings?.height || "-";
+    const fps = settings?.frameRate ? `${Math.round(settings.frameRate)}fps` : "fps ?";
+    const facing = settings?.facingMode || "kamera";
+    setCameraInfo(`Kamera aktif: ${facing} | ${width}x${height} | ${fps}`);
   } catch {
     // capability may not be available on all devices
   }
+}
+
+function loadImageElementFromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Gagal memuat foto HD."));
+    };
+    img.src = url;
+  });
+}
+
+async function captureHdSource(video) {
+  const track = getTrack();
+  if (track && typeof window.ImageCapture !== "undefined") {
+    try {
+      const imageCapture = new window.ImageCapture(track);
+      const blob = await imageCapture.takePhoto();
+
+      if (typeof createImageBitmap === "function") {
+        const bitmap = await createImageBitmap(blob);
+        return {
+          source: bitmap,
+          width: bitmap.width,
+          height: bitmap.height,
+          sourceType: "photo",
+          cleanup: () => bitmap.close(),
+        };
+      }
+
+      const img = await loadImageElementFromBlob(blob);
+      return {
+        source: img,
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+        sourceType: "photo",
+        cleanup: () => {},
+      };
+    } catch {
+      // fallback ke frame video jika takePhoto tidak didukung / gagal
+    }
+  }
+
+  return {
+    source: video,
+    width: video.videoWidth,
+    height: video.videoHeight,
+    sourceType: "video",
+    cleanup: () => {},
+  };
 }
 
 async function applyZoom(nextZoom) {
@@ -418,6 +490,7 @@ async function startScanner() {
   } catch (error) {
     console.error(error);
     setStatus("Gagal memulai scanner. Pastikan izin kamera aktif.");
+    setCameraInfo("Kamera gagal diinisialisasi.");
     if (startBtn) startBtn.disabled = false;
     if (stopBtn) stopBtn.disabled = true;
   } finally {
@@ -450,6 +523,7 @@ async function stopScanner() {
     }
     setZoomControlsEnabled(false);
     setStatus("Scanner dihentikan.");
+    setCameraInfo("Kamera tidak aktif.");
   } finally {
     scannerTransitioning = false;
   }
@@ -464,10 +538,14 @@ async function scanMiniQrViaHdSnapshot() {
   if (hdScanBtn) hdScanBtn.disabled = true;
   setStatus("Memproses snapshot HD untuk QR mini...");
 
+  let hdCapture = null;
   try {
     const qrEngine = scanner._qrEnginePromise;
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
+    hdCapture = await captureHdSource(video);
+    const vw = hdCapture.width;
+    const vh = hdCapture.height;
+
+    setCameraInfo(`Mode HD source: ${hdCapture.sourceType} | ${vw}x${vh}`);
 
     const src = document.createElement("canvas");
     src.width = vw;
@@ -475,7 +553,7 @@ async function scanMiniQrViaHdSnapshot() {
     const srcCtx = src.getContext("2d", { willReadFrequently: true });
     if (!srcCtx) return;
     srcCtx.imageSmoothingEnabled = false;
-    srcCtx.drawImage(video, 0, 0, vw, vh);
+    srcCtx.drawImage(hdCapture.source, 0, 0, vw, vh);
 
     const tryScan = async (target) => {
       try {
@@ -493,8 +571,9 @@ async function scanMiniQrViaHdSnapshot() {
     let hit = await tryScan(src);
 
     const up = document.createElement("canvas");
-    up.width = 2200;
-    up.height = 2200;
+    const upscaleSize = Math.min(3200, Math.max(2200, Math.floor(Math.min(vw, vh) * 1.5)));
+    up.width = upscaleSize;
+    up.height = upscaleSize;
     const upCtx = up.getContext("2d", { willReadFrequently: true });
     if (!upCtx) return;
     upCtx.imageSmoothingEnabled = false;
@@ -544,6 +623,7 @@ async function scanMiniQrViaHdSnapshot() {
       setStatus("Belum terbaca. Coba jarak 7-12 cm, lalu tekan Scan HD lagi.");
     }
   } finally {
+    if (hdCapture?.cleanup) hdCapture.cleanup();
     hdScanBusy = false;
     if (hdScanBtn) hdScanBtn.disabled = !scannerRunning;
   }
@@ -607,5 +687,6 @@ function bindUi() {
 
 window.addEventListener("load", () => {
   bindUi();
+  setCameraInfo("Kamera belum aktif.");
   setStatus('Siap memindai QR mini. Tekan "Mulai Scan".');
 });
