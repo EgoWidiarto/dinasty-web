@@ -1,4 +1,4 @@
-const CACHE_VERSION = "dinasty-static-v2026-04-05-6";
+const CACHE_VERSION = "dinasty-static-v2026-04-05-8";
 const APP_SHELL = [
   "/",
   "/index.html",
