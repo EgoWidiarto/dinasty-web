@@ -6,6 +6,7 @@ let torchEnabled = false;
 let zoomSupported = false;
 let lastScanAt = 0;
 let lastScannedValue = "";
+let autoZoomInterval = null;
 
 const statusEl = document.getElementById("statusMessage");
 const resultCardEl = document.getElementById("scanResultCard");
@@ -105,6 +106,33 @@ async function onDecode(decoded) {
   await logScannedUrl(text);
 }
 
+function stopAutoZoomAssist() {
+  if (autoZoomInterval) {
+    clearInterval(autoZoomInterval);
+    autoZoomInterval = null;
+  }
+}
+
+function startAutoZoomAssist() {
+  stopAutoZoomAssist();
+  if (!scannerRunning || !zoomSupported || !zoomSlider) return;
+
+  autoZoomInterval = setInterval(async () => {
+    if (!scannerRunning || !zoomSupported || !zoomSlider) return;
+    const idleMs = Date.now() - lastScanAt;
+    if (idleMs < 1800) return;
+
+    const step = Number(zoomSlider.step || 0.1);
+    const current = Number(zoomSlider.value || 1);
+    const max = Number(zoomSlider.max || current);
+    const next = Math.min(max, current + step * 1.5);
+
+    if (next > current + 0.0001) {
+      await applyZoom(next);
+    }
+  }, 1200);
+}
+
 async function setupCamera() {
   if (!window.QrScanner) throw new Error("Nimiq QrScanner tidak tersedia.");
 
@@ -115,20 +143,20 @@ async function setupCamera() {
       onDecode,
       {
         preferredCamera: "environment",
-        maxScansPerSecond: 12,
+        maxScansPerSecond: 10,
         highlightScanRegion: true,
         highlightCodeOutline: true,
         returnDetailedScanResult: true,
         calculateScanRegion: (video) => {
           const smaller = Math.min(video.videoWidth, video.videoHeight);
-          const scanSize = Math.floor(smaller * 0.52);
+          const scanSize = Math.floor(smaller * 0.45);
           return {
             x: Math.floor((video.videoWidth - scanSize) / 2),
             y: Math.floor((video.videoHeight - scanSize) / 2),
             width: scanSize,
             height: scanSize,
-            downScaledWidth: 960,
-            downScaledHeight: 960,
+            downScaledWidth: 1700,
+            downScaledHeight: 1700,
           };
         },
       },
@@ -208,7 +236,7 @@ async function optimizeCameraForMiniQr() {
     }
 
     if (caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max)) {
-      const suggestedZoom = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.4;
+      const suggestedZoom = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.7;
       advanced.push({ zoom: suggestedZoom });
       if (zoomSlider) {
         zoomSlider.value = String(suggestedZoom);
@@ -281,11 +309,13 @@ async function startScanner() {
     await scanner.start();
 
     scannerRunning = true;
+    lastScanAt = Date.now();
     if (startBtn) startBtn.disabled = true;
     if (stopBtn) stopBtn.disabled = false;
 
     await setupZoomAndTorchCapabilities();
     await optimizeCameraForMiniQr();
+    startAutoZoomAssist();
     setStatus("Scanner aktif. Posisikan QR mini di area kotak, jarak 8-12 cm, lalu tahan stabil 1-2 detik.");
   } catch (error) {
     console.error(error);
@@ -307,6 +337,8 @@ async function stopScanner() {
       scanner.destroy();
       scanner = null;
     }
+
+    stopAutoZoomAssist();
 
     scannerRunning = false;
     torchEnabled = false;
