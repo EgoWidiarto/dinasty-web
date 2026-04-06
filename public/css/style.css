@@ -37,7 +37,7 @@
 html,
 body {
   font-family: "Poppins", sans-serif;
-  background-image: linear-gradient(180deg, rgba(65, 135, 200, 0.45) 0%, rgba(54, 110, 170, 0.55) 58%, rgba(40, 90, 150, 0.65) 100%), url("../assets/component/bg_dinasty.png");
+  background-image: linear-gradient(180deg, rgba(65, 135, 200, 0.45) 0%, rgba(54, 110, 170, 0.55) 58%, rgba(40, 90, 150, 0.65) 100%), url("../assets/component/bg_dinasti.png");
   background-size: cover, cover;
   background-position: center, center;
   background-attachment: fixed, fixed;
