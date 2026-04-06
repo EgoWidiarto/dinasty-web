@@ -1,7 +1,7 @@
 {
-  "name": "dinasty-app",
+  "name": "dinasti-app",
   "version": "1.0.0",
-  "description": "Dinamika Sejarah Indonesia - PWA Web View",
+  "description": "Dinasti - PWA Web View",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

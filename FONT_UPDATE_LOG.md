@@ -19,7 +19,7 @@
 
 ### 3. **Background Updates**
 
-- ✅ Background body semua halaman menggunakan `bg_dinasty.png`
+- ✅ Background body semua halaman menggunakan `bg_dinasti.png`
 - ✅ Background fixed dan cover untuk tampilan konsisten
 - ✅ Menambahkan overlay gelap (rgba(0,0,0,0.4)) untuk kontras font
 - ✅ Header section dengan background semi-transparent untuk keterbacaan
@@ -38,7 +38,7 @@
 1. **style.css**
    - Ditambahkan @font-face declaration untuk Turtles font
    - Update semua color variables
-   - Update background body dengan bg_dinasty.png
+   - Update background body dengan bg_dinasti.png
    - Enhanced typography dengan text shadows
    - Gold color theme di semua components
 
@@ -67,7 +67,7 @@ Jika tidak ada font Turtles, aplikasi otomatis menggunakan Playfair Display.
 - [ ] Test di browser dengan font Turtles tersedia
 - [ ] Test fallback ke Playfair Display
 - [ ] Verifikasi warna emas terlihat jelas di semua halaman
-- [ ] Check background bg_dinasty.png muncul di semua pages
+- [ ] Check background bg_dinasti.png muncul di semua pages
 - [ ] Test responsive design (mobile & desktop)
 - [ ] Verify deployment dengan relative paths
 

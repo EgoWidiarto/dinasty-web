@@ -16,7 +16,7 @@ File font yang digunakan: **Turtles-zOzL.ttf**
 
 ## Elemen yang Menggunakan Font Turtles
 
-- ✅ Page titles (ASK DINASTY, SCAN DINASTY, "Yuk Cari Tau!")
+- ✅ Page titles (Dinasti, Ask Dinasti, Scan Dinasti, "Yuk Cari Tau!")
 - ✅ Semua heading (h1, h2, h3, h4, h5, h6)
 - ✅ Card titles
 - ✅ Alert headings
@@ -40,4 +40,4 @@ Saat ini, aplikasi sudah dikonfigurasi untuk:
 - Menggunakan font Turtles jika tersedia
 - Fallback ke Playfair Display jika font Turtles tidak ditemukan
 - Semua header menggunakan warna emas (#D6A732)
-- Background menggunakan bg_dinasty.png
+- Background menggunakan bg_dinasti.png

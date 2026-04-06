@@ -1,4 +1,4 @@
-# 🚀 Deploy ke Render - Dinasty App
+# 🚀 Deploy ke Render - Dinasti App
 
 ## 📋 Persiapan
 
@@ -9,7 +9,7 @@ git init
 git add .
 git commit -m "Initial commit for Render deployment"
 git branch -M main
-git remote add origin https://github.com/username/dinasty.git
+git remote add origin https://github.com/username/dinasti.git
 git push -u origin main
 ```
 
@@ -25,16 +25,16 @@ git push -u origin main
 #### Cara Otomatis (Recommended):
 
 1. Klik **"New +"** → **"Web Service"**
-2. Connect repository GitHub kamu: **dinasty**
+2. Connect repository GitHub kamu: **dinasti**
 3. Render akan otomatis detect `render.yaml` ✅
 4. Klik **"Apply"** atau **"Create Web Service"**
 
 #### Cara Manual:
 
 1. Klik **"New +"** → **"Web Service"**
-2. Pilih repository **dinasty**
+2. Pilih repository **dinasti**
 3. Isi konfigurasi:
-   - **Name**: `dinasty-app` (atau nama lain)
+   - **Name**: `dinasti-app` (atau nama lain)
    - **Region**: Singapore (terdekat)
    - **Branch**: `main`
    - **Runtime**: Node
@@ -56,15 +56,15 @@ git push -u origin main
 
 1. Klik **"Create Web Service"**
 2. Tunggu ~3-5 menit untuk build pertama kali
-3. URL app kamu akan muncul: `https://dinasty-app.onrender.com`
+3. URL app kamu akan muncul: `https://dinasti-app.onrender.com`
 
 ## ✅ Verifikasi Deployment
 
 1. **Buka URL** yang diberikan Render
 2. **Test features**:
    - Homepage loading ✓
-   - ASK HISTORIA (chatbot) ✓
-   - SCAN HISTORIA (QR scanner) ✓
+   - ASK DINASTI (chatbot) ✓
+   - SCAN DINASTI (QR scanner) ✓
 
 ## 🔧 Update/Redeploy
 

@@ -17,7 +17,7 @@ Font **Turtles-zOzL.ttf** telah berhasil diimplementasikan dengan benar!
 
 Semua elemen berikut menggunakan font Turtles:
 
-- Title pages (ASK DINASTY, SCAN DINASTY, "Yuk Cari Tau!")
+- Title pages (Dinasti, Ask Dinasti, Scan Dinasti, "Yuk Cari Tau!")
 - Semua heading (h1, h2, h3, h4, h5, h6)
 - Card titles
 - Alert headings
@@ -30,7 +30,7 @@ Semua elemen berikut menggunakan font Turtles:
 
 ### 4. Background ✅
 
-- Semua halaman menggunakan `bg_dinasty.png`
+- Semua halaman menggunakan `bg_dinasti.png`
 - Background fixed dan cover
 - Overlay gelap untuk kontras font
 

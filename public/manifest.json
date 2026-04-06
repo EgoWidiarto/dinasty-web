@@ -1,7 +1,7 @@
 {
-  "name": "Dinamika Sejarah Indonesia",
-  "short_name": "DINAMIKA",
-  "description": "Aplikasi PWA untuk belajar sejarah Indonesia dengan chatbot AI dan scanner QR",
+  "name": "Dinasti",
+  "short_name": "DINASTI",
+  "description": "Dinasti - PWA untuk belajar sejarah Indonesia dengan chatbot AI dan scanner QR",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1a2e",

@@ -11,7 +11,7 @@
 
 ### Android Chrome:
 
-1. Buka app di browser: `https://dinasty-web.vercel.app`
+1. Buka app di browser: `https://dinasti-web.vercel.app`
 2. Tap **titik tiga (⋮)** di pojok kanan atas
 3. Pilih **"Settings"** / **"Setelan"**
 4. Pilih **"Site settings"** / **"Setelan situs"**
@@ -35,7 +35,7 @@
 
 Atau:
 
-1. Tutup **semua tab** app dinasty
+1. Tutup **semua tab** app dinasti
 2. Tutup browser sepenuhnya (dari recent apps)
 3. Buka lagi browser
 4. Buka app lagi
@@ -90,7 +90,7 @@ Jika masih ada tampilan lama:
 Untuk memastikan sudah dapat update terbaru:
 
 1. Buka **Developer Console** (jika bisa)
-2. Cek log: `✅ Cache opened` dengan versi `dinamika-v5`
+2. Cek log: `✅ Cache opened` dengan versi `dinasti-v5`
 
 ---
 

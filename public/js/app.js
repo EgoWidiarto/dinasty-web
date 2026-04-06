@@ -1,7 +1,7 @@
-const CLIENT_BUILD_VERSION = "2026-04-05-8";
+const CLIENT_BUILD_VERSION = "2026-04-06-1";
 
 async function resetClientCachesIfNeeded() {
-  const lastVersion = localStorage.getItem("dinasty-client-version");
+  const lastVersion = localStorage.getItem("dinasti-client-version");
   if (lastVersion === CLIENT_BUILD_VERSION) return false;
 
   try {
@@ -18,7 +18,7 @@ async function resetClientCachesIfNeeded() {
     console.warn("Cache reset gagal:", error);
   }
 
-  localStorage.setItem("dinasty-client-version", CLIENT_BUILD_VERSION);
+  localStorage.setItem("dinasti-client-version", CLIENT_BUILD_VERSION);
   window.location.reload();
   return true;
 }
@@ -80,7 +80,7 @@ async function initServiceWorker() {
 initServiceWorker().catch((error) => console.warn(error));
 
 // App initialization
-console.log("🚀 Aplikasi Dinamika Sejarah Indonesia dimulai");
+console.log("🚀 Aplikasi Dinasti dimulai");
 
 // Menu cards navigation (avoid inline onclick)
 window.addEventListener("DOMContentLoaded", () => {

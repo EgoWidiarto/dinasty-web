@@ -1,4 +1,4 @@
-# 🚀 Deploy ke Vercel - Dinasty App
+# 🚀 Deploy ke Vercel - Dinasti App
 
 ## 📋 Langkah Deploy (Super Cepat!)
 
@@ -9,7 +9,7 @@ git init
 git add .
 git commit -m "Deploy to Vercel"
 git branch -M main
-git remote add origin https://github.com/username/dinasty.git
+git remote add origin https://github.com/username/dinasti.git
 git push -u origin main
 ```
 
@@ -20,7 +20,7 @@ git push -u origin main
 1. Buka: **https://vercel.com**
 2. Klik **"Sign Up"** dengan GitHub
 3. Klik **"Add New Project"**
-4. Import repository: **dinasty**
+4. Import repository: **dinasti**
 5. **Environment Variables** → Tambahkan:
    ```
    GROQ_API_KEY = your_groq_api_key_here
@@ -42,7 +42,7 @@ vercel
 
 # Follow prompts:
 # - Link to existing project? No
-# - What's your project's name? dinasty
+# - What's your project's name? dinasti
 # - In which directory is your code located? ./
 # - Want to override settings? No
 
@@ -74,8 +74,8 @@ vercel env add GROQ_API_KEY
 
 Setelah deploy, kamu akan dapat:
 
-- **Production**: `https://dinasty.vercel.app`
-- **Preview**: `https://dinasty-xxx.vercel.app` (setiap git push)
+- **Production**: `https://dinasti.vercel.app`
+- **Preview**: `https://dinasti-xxx.vercel.app` (setiap git push)
 
 ## 🔄 Auto-Deploy
 
@@ -100,7 +100,7 @@ git push origin main
 
 ## 📱 Aktifkan PWA
 
-1. Buka app di mobile browser: `https://dinasty.vercel.app`
+1. Buka app di mobile browser: `https://dinasti.vercel.app`
 2. Klik **"Add to Home Screen"**
 3. Icon muncul di home screen ✨
 
@@ -155,4 +155,4 @@ vercel build
 
 **App kamu live dalam 2 menit! 🚀**
 
-**URL**: `https://dinasty.vercel.app`
+**URL**: `https://dinasti.vercel.app`
